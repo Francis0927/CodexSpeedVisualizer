@@ -1,0 +1,28 @@
+# Dependencies and generated packages
+node_modules/
+dist/
+release/
+electron-runtime.zip
+.electron-parts/
+app-builder-bin.tgz
+
+# Local logs, caches, and test output
+*.log
+*.tsbuildinfo
+.vite/
+coverage/
+.nyc_output/
+
+# Machine-specific settings
+.env
+.env.*
+!.env.example
+electron/update-share.json
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Local UI screenshots
+preview-*.png
