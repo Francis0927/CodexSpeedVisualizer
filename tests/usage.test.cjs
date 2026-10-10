@@ -21,6 +21,17 @@ function lifecycle(time, type) {
   return JSON.stringify({ timestamp: new Date(time).toISOString(), type: "event_msg", payload: { type } }) + "\n";
 }
 
+function quotaEvent(time, primary, secondary, extra = {}) {
+  return JSON.stringify({ timestamp: new Date(time).toISOString(), type: "event_msg", payload: {
+    type: "token_count", ...extra,
+    rate_limits: { limit_id: "codex", primary, secondary, ...extra.rate_limits }
+  } }) + "\n";
+}
+
+function quotaWindow(used, minutes, resetsAt) {
+  return { used_percent: used, window_minutes: minutes, resets_at: resetsAt };
+}
+
 async function fixture(now) {
   const home = await fs.mkdtemp(path.join(os.tmpdir(), "speed-pet-test-"));
   const folder = path.join(home, "sessions", "2026", "09", "24");
@@ -203,4 +214,83 @@ test("does not double count a session copied into the archive", async () => {
     assert.equal(collector.snapshot().total, 100);
     assert.equal(collector.snapshot().historyTotal, 100);
   } finally { await sample.cleanup(); }
+});
+
+test("reads quota-only events and repeated counters without changing token totals", async () => {
+  const now = Date.now();
+  const sample = await fixture(new Date(now));
+  try {
+    const resetsAt = Math.floor(now / 1000) + 3600;
+    await fs.writeFile(sample.file, counter(now - 3000, 100, 20) + quotaEvent(now - 2000,
+      quotaWindow(25.5, 300, resetsAt), quotaWindow(60, 10080, resetsAt + 86400)));
+    const collector = new UsageCollector(sample.home, () => now);
+    await collector.poll();
+    assert.equal(collector.snapshot().total, 120);
+    assert.deepEqual(collector.snapshot().rateLimits, {
+      updatedAt: now - 2000,
+      fiveHour: { remainingPercent: 74.5, resetsAt: resetsAt * 1000 },
+      weekly: { remainingPercent: 40, resetsAt: (resetsAt + 86400) * 1000 }
+    });
+    await fs.appendFile(sample.file, quotaEvent(now - 1000, quotaWindow(30, 300, resetsAt), null,
+      { info: { total_token_usage: { input_tokens: 100, output_tokens: 20 } } }));
+    await collector.poll();
+    assert.equal(collector.snapshot().total, 120);
+    assert.equal(collector.snapshot().eventCount, 1);
+    assert.equal(collector.snapshot().rateLimits.fiveHour.remainingPercent, 70);
+    assert.equal(collector.snapshot().rateLimits.weekly, null);
+    collector.resetHistory();
+    assert.equal(collector.snapshot().rateLimits.fiveHour.remainingPercent, 70);
+  } finally { await sample.cleanup(); }
+});
+
+test("selects the newest account quota across sessions, archives, days and out-of-order events", async () => {
+  const now = Date.now();
+  const sample = await fixture(new Date(now));
+  try {
+    const reset = Math.floor(now / 1000) + 3600;
+    const archive = path.join(sample.home, "archived_sessions", "old-session.jsonl");
+    await fs.mkdir(path.dirname(archive), { recursive: true });
+    await fs.writeFile(archive, quotaEvent(now - 86400000, quotaWindow(10, 300, reset), null));
+    await fs.writeFile(sample.file,
+      quotaEvent(now - 1000, quotaWindow(81, 300, reset), quotaWindow(23, 10080, reset + 86400)) +
+      quotaEvent(now - 2000, quotaWindow(50, 300, reset), null) +
+      quotaEvent(now, quotaWindow(99, 300, reset), null, { rate_limits: { limit_id: "codex_other" } }));
+    const collector = new UsageCollector(sample.home, () => now);
+    await collector.poll();
+    assert.equal(collector.snapshot().rateLimits.updatedAt, now - 1000);
+    assert.equal(collector.snapshot().rateLimits.fiveHour.remainingPercent, 19);
+    assert.equal(collector.snapshot().rateLimits.weekly.remainingPercent, 77);
+    const restarted = new UsageCollector(sample.home, () => now);
+    await restarted.poll();
+    assert.deepEqual(restarted.snapshot().rateLimits, collector.snapshot().rateLimits);
+  } finally { await sample.cleanup(); }
+});
+
+test("identifies quota windows by duration, clamps percentages, and preserves unknown reset times", () => {
+  const now = Date.now();
+  const state = newFileState();
+  acceptBytes(state, Buffer.from(quotaEvent(now,
+    quotaWindow(-2, 10080, null), quotaWindow(102, 300, "123"))));
+  assert.deepEqual(state.rateLimits, {
+    updatedAt: now,
+    fiveHour: { remainingPercent: 0, resetsAt: null },
+    weekly: { remainingPercent: 100, resetsAt: null }
+  });
+  const collector = new UsageCollector("unused", () => now + 1000);
+  collector.files.set("session", state);
+  assert.equal(collector.snapshot().rateLimits.fiveHour.remainingPercent, 0);
+});
+
+test("missing, invalid and unrelated quota windows do not fabricate remaining allowance", () => {
+  const now = Date.now();
+  const state = newFileState();
+  acceptBytes(state, Buffer.from(counter(now, 20, 5) + quotaEvent(now,
+    quotaWindow(null, 300, null), quotaWindow(20, 60, now / 1000))));
+  assert.equal(state.rateLimits, null);
+  acceptBytes(state, Buffer.from(quotaEvent(now + 1, quotaWindow(30, 300, 8.65e12), null,
+    { rate_limits: { limit_id: null } })));
+  assert.equal(state.rateLimits.fiveHour.remainingPercent, 70);
+  assert.equal(state.rateLimits.fiveHour.resetsAt, null);
+  acceptBytes(state, Buffer.from(quotaEvent(now + 2, null, null)));
+  assert.equal(state.rateLimits.updatedAt, now + 1);
 });

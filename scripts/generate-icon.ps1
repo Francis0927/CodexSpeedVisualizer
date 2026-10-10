@@ -6,20 +6,37 @@ $bmp = New-Object System.Drawing.Bitmap 256, 256
 $g = [System.Drawing.Graphics]::FromImage($bmp)
 $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
 $g.Clear([System.Drawing.Color]::Transparent)
-$dark = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(20, 66, 70))
-$mint = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(106, 232, 180))
-$light = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(181, 255, 186))
-$ink = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(19, 67, 77))
-$pink = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 155, 170))
-$g.FillEllipse($dark, 8, 8, 240, 240)
-$g.FillEllipse($mint, 43, 50, 170, 166)
-$g.FillEllipse($light, 53, 54, 145, 122)
-$g.FillEllipse($ink, 84, 116, 15, 22)
-$g.FillEllipse($ink, 157, 116, 15, 22)
-$g.FillEllipse($pink, 61, 148, 30, 14)
-$g.FillEllipse($pink, 165, 148, 30, 14)
-$pen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(19, 67, 77)), 8
-$g.DrawArc($pen, 111, 143, 34, 24, 0, 180)
+$dark = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(9, 31, 42))
+$face = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(20, 57, 68))
+$light = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(220, 255, 239))
+$orange = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 155, 103))
+$rim = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(72, 130, 129)), 5
+$track = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(51, 83, 91)), 12
+$progress = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(148, 234, 179)), 12
+$tick = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(184, 221, 211)), 4
+$g.FillEllipse($dark, 7, 7, 242, 242)
+$g.DrawEllipse($rim, 10, 10, 236, 236)
+$g.FillEllipse($face, 36, 44, 184, 184)
+$g.DrawArc($track, 49, 59, 158, 158, 140, 260)
+$g.DrawArc($progress, 49, 59, 158, 158, 140, 170)
+for ($i = 0; $i -le 12; $i++) {
+  $angle = (140 + $i * 260 / 12) * [Math]::PI / 180
+  $inner = if ($i % 3 -eq 0) { 91 } else { 97 }
+  $g.DrawLine($tick, [single](128 + $inner * [Math]::Cos($angle)), [single](138 + $inner * [Math]::Sin($angle)), [single](128 + 105 * [Math]::Cos($angle)), [single](138 + 105 * [Math]::Sin($angle)))
+}
+$needle = [System.Drawing.PointF[]]@(
+  [System.Drawing.PointF]::new(122, 134),
+  [System.Drawing.PointF]::new(181, 75),
+  [System.Drawing.PointF]::new(134, 142)
+)
+$g.FillPolygon($orange, $needle)
+$g.FillEllipse($orange, 117, 127, 22, 22)
+$g.FillEllipse($dark, 123, 133, 10, 10)
+$g.FillRectangle($dark, 92, 170, 72, 31)
+$font = New-Object System.Drawing.Font 'Segoe UI', 19, ([System.Drawing.FontStyle]::Bold), ([System.Drawing.GraphicsUnit]::Pixel)
+$format = New-Object System.Drawing.StringFormat
+$format.Alignment = [System.Drawing.StringAlignment]::Center
+$g.DrawString('T/s', $font, $light, [System.Drawing.RectangleF]::new(92, 173, 72, 26), $format)
 $pngPath = Join-Path $out 'icon.png'
 $bmp.Save($pngPath, [System.Drawing.Imaging.ImageFormat]::Png)
 $g.Dispose()
@@ -41,9 +58,4 @@ $writer.Write([uint32]$png.Length)
 $writer.Write([uint32]22)
 $writer.Write($png)
 $writer.Dispose()
-$pen.Dispose()
-$dark.Dispose()
-$mint.Dispose()
-$light.Dispose()
-$ink.Dispose()
-$pink.Dispose()
+foreach ($resource in @($dark, $face, $light, $orange, $rim, $track, $progress, $tick, $font, $format)) { $resource.Dispose() }

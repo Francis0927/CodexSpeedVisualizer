@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState } from "react";
-import type { AppInfo, PetSettings, UpdateStatus, UsageSnapshot } from "./env";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { CSSProperties } from "react";
+import type { AppInfo, AppSettings, QuotaWindow, UpdateStatus, UsageSnapshot } from "./env";
 
 const EMPTY: UsageSnapshot = {
-  day: null, input: 0, output: 0, total: 0, historyTotal: 0, speed: 0, turnSpeed: null, turnTokens: null, turnSeconds: null,
+  day: null, input: 0, output: 0, total: 0, historyTotal: 0, rateLimits: null, speed: 0, turnSpeed: null, turnTokens: null, turnSeconds: null,
   active: false, running: false, lastEvent: null, eventCount: 0, source: "waiting", error: null
 };
-const DEFAULT_SETTINGS: PetSettings = { alwaysOnTop: true, reducedMotion: false, launchAtLogin: false, style: "pet", size: "medium", petImage: null, autoHideChrome: true };
+const DEFAULT_SETTINGS: AppSettings = { alwaysOnTop: true, reducedMotion: false, launchAtLogin: false, size: "medium", autoHideChrome: true };
 const SIZE_SCALE = { small: 0.55, medium: 0.82, large: 1.05 };
 
 function shortCount(value: number) {
@@ -22,64 +23,31 @@ function lastSeen(value: number | null) {
   return new Date(value).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-// Settings store only the file name; the main process serves the bytes through
-// the speedpet:// scheme. Full URLs are passed through so the browser preview
-// (?pet=https://...) can use any reachable image.
-function petImageUrl(image: string) {
-  if (/^(https?|data|file|speedpet):/i.test(image)) return image;
-  return `speedpet://pet/${encodeURIComponent(image)}`;
+function resetTime(value: number) {
+  return new Date(value).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
 }
 
-// Browser preview helper: ?size=small|medium|large&style=pet|gauge&pet=<url>
-function devSettingsOverride(): Partial<PetSettings> {
+function QuotaRow({ label, quota, now }: { label: string; quota: QuotaWindow | null; now: number }) {
+  const expired = quota?.resetsAt != null && quota.resetsAt <= now;
+  const remaining = quota && !expired ? quota.remainingPercent : null;
+  const percent = remaining === null ? null : `${Number(remaining.toFixed(1))}%`;
+  return <div className={`quota-row ${remaining !== null && remaining <= 20 ? "quota-low" : ""}`}>
+    <div className="quota-heading"><span>{label}</span><strong aria-label={percent === null ? undefined : `剩余 ${percent}`}>{percent === null ? expired ? "待刷新" : "暂无数据" : percent}</strong></div>
+    <div className="quota-track" role={remaining === null ? undefined : "progressbar"} aria-label={`${label}剩余额度`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={remaining ?? undefined}>
+      <div className="quota-fill" style={{ width: `${remaining ?? 0}%` }} />
+    </div>
+    <div className="quota-reset">{quota?.resetsAt != null ? `重置 ${resetTime(quota.resetsAt)}` : "重置时间暂无"}</div>
+  </div>;
+}
+
+// Browser preview helper: ?size=small|medium|large
+function devSettingsOverride(): Partial<AppSettings> {
   if (window.speedPet) return {};
   const params = new URLSearchParams(window.location.search);
-  const patch: Partial<PetSettings> = {};
+  const patch: Partial<AppSettings> = {};
   const size = params.get("size");
   if (size === "small" || size === "medium" || size === "large") patch.viewSize = size;
-  const style = params.get("style");
-  if (style === "pet" || style === "gauge") patch.style = style;
-  const pet = params.get("pet");
-  if (pet) patch.petImage = pet;
   return patch;
-}
-
-function DefaultPetArt() {
-  return <svg className="pet-art" viewBox="0 0 220 190" role="img" aria-hidden="true">
-    <defs>
-      <linearGradient id="body" x1="0" y1="0" x2="1" y2="1"><stop stopColor="#adffbb"/><stop offset=".52" stopColor="#63e5be"/><stop offset="1" stopColor="#22baa9"/></linearGradient>
-      <linearGradient id="ear" x1="0" y1="0" x2="1" y2="1"><stop stopColor="#8cffe0"/><stop offset="1" stopColor="#31bdba"/></linearGradient>
-      <linearGradient id="belly" x1="0" y1="0" x2=".5" y2="1"><stop stopColor="#ecfff4" stopOpacity=".75"/><stop offset="1" stopColor="#b7f7e4" stopOpacity=".25"/></linearGradient>
-      <filter id="shadow"><feGaussianBlur stdDeviation="5"/></filter>
-    </defs>
-    <ellipse cx="110" cy="176" rx="62" ry="9" fill="#0a856f" opacity=".22" filter="url(#shadow)"/>
-    <path d="M49 76 Q22 52 34 29 Q62 33 80 54" fill="url(#ear)" stroke="#106c70" strokeWidth="4" strokeLinejoin="round"/>
-    <path d="M171 76 Q198 52 186 29 Q158 33 140 54" fill="url(#ear)" stroke="#106c70" strokeWidth="4" strokeLinejoin="round"/>
-    <path d="M48 73 C54 39 82 35 110 38 C138 35 166 39 172 73 C188 87 184 143 159 159 C138 177 82 177 61 159 C36 143 32 87 48 73Z" fill="url(#body)" stroke="#106c70" strokeWidth="4"/>
-    <ellipse cx="110" cy="130" rx="49" ry="31" fill="url(#belly)"/>
-    <path d="M74 159 Q69 175 82 177 Q96 181 101 165" fill="#35bdaa" stroke="#106c70" strokeWidth="4"/>
-    <path d="M146 159 Q151 175 138 177 Q124 181 119 165" fill="#35bdaa" stroke="#106c70" strokeWidth="4"/>
-    <circle cx="45" cy="116" r="10" fill="#48d6b4" stroke="#106c70" strokeWidth="3"/>
-    <circle cx="175" cy="116" r="10" fill="#48d6b4" stroke="#106c70" strokeWidth="3"/>
-    <ellipse cx="82" cy="94" rx="7" ry="10" fill="#163e4e" className="pet-eye"/>
-    <ellipse cx="138" cy="94" rx="7" ry="10" fill="#163e4e" className="pet-eye"/>
-    <circle cx="80" cy="90" r="2.5" fill="#fff"/><circle cx="136" cy="90" r="2.5" fill="#fff"/>
-    <ellipse cx="65" cy="112" rx="11" ry="6" fill="#ff93a3" opacity=".65"/>
-    <ellipse cx="155" cy="112" rx="11" ry="6" fill="#ff93a3" opacity=".65"/>
-    <path d="M99 111 Q110 124 121 111" fill="none" stroke="#17515a" strokeWidth="4" strokeLinecap="round"/>
-    <path d="M102 54 Q110 50 118 54" fill="none" stroke="#dcfff2" strokeOpacity=".65" strokeWidth="4" strokeLinecap="round"/>
-    <circle className="pet-spark spark-a" cx="29" cy="84" r="4" fill="#d2ff82"/>
-    <circle className="pet-spark spark-b" cx="194" cy="98" r="5" fill="#d2ff82"/>
-  </svg>;
-}
-
-function Pet({ mood, image }: { mood: "idle" | "working" | "fast"; image: string | null }) {
-  return <div className={`pet-wrap pet-${mood}`} aria-label={`宠物状态：${mood === "idle" ? "待机" : mood === "fast" ? "加速" : "工作"}`}>
-    <div className="pet-glow" />
-    {image
-      ? <img className="pet-art pet-custom" src={petImageUrl(image)} alt="" draggable={false} />
-      : <DefaultPetArt />}
-  </div>;
 }
 
 function dialPoint(angle: number, radius: number): [number, number] {
@@ -146,15 +114,16 @@ const DEFAULT_APP_INFO: AppInfo = { version: "", buildKind: "dev", updateEnabled
 
 export default function App() {
   const [usage, setUsage] = useState<UsageSnapshot>(EMPTY);
-  const [settings, setSettings] = useState<PetSettings>(() => ({ ...DEFAULT_SETTINGS, ...devSettingsOverride() }));
+  const [settings, setSettings] = useState<AppSettings>(() => ({ ...DEFAULT_SETTINGS, ...devSettingsOverride() }));
   const [panel, setPanel] = useState<"none" | "details" | "settings">("none");
   const [clock, setClock] = useState(Date.now());
   const [appInfo, setAppInfo] = useState<AppInfo>(DEFAULT_APP_INFO);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>(IDLE_UPDATE);
   const [confirmHistoryReset, setConfirmHistoryReset] = useState(false);
-  const [chromeVisible, setChromeVisible] = useState(true);
-  const chromeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const hoverRef = useRef(false);
+  const [expanded, setExpanded] = useState(true);
+  const [hovered, setHovered] = useState(false);
+  const hasHovered = useRef(false);
+  const viewportRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -176,41 +145,28 @@ export default function App() {
   useEffect(() => { window.speedPet?.setPanelOpen(panel !== "none"); }, [panel]);
   useEffect(() => { setConfirmHistoryReset(false); }, [panel]);
 
-  // Auto-hide the window chrome (title bar + status row): it fades out after a
-  // few seconds and reappears on hover/click. Panels force it visible.
-  const clearChromeTimer = () => { if (chromeTimer.current) { clearTimeout(chromeTimer.current); chromeTimer.current = null; } };
-  const showChrome = () => { clearChromeTimer(); setChromeVisible(true); };
-  const scheduleChromeHide = (delay = 1600) => {
-    if (!settings.autoHideChrome) return;
-    clearChromeTimer();
-    chromeTimer.current = setTimeout(() => setChromeVisible(false), delay);
-  };
+  // Keep the dial and speed/totals card visible; fold the header and quotas.
+  // Hover and open panels keep the window expanded for as long as needed.
   useEffect(() => {
-    if (settings.autoHideChrome) scheduleChromeHide(4000);
-    else { clearChromeTimer(); setChromeVisible(true); }
-    return clearChromeTimer;
-  }, [settings.autoHideChrome]);
-  useEffect(() => {
-    if (panel !== "none") showChrome();
-    else if (!hoverRef.current) scheduleChromeHide();
-  }, [panel]);
-  const chromeHidden = settings.autoHideChrome && !chromeVisible && panel === "none";
-  // Let the main process shrink the window to fit once the chrome is gone.
-  useEffect(() => { window.speedPet?.setChromeHidden(chromeHidden); }, [chromeHidden]);
+    if (!settings.autoHideChrome || hovered || panel !== "none") {
+      setExpanded(true);
+      return;
+    }
+    const timer = setTimeout(() => setExpanded(false), hasHovered.current ? 1600 : 4000);
+    return () => clearTimeout(timer);
+  }, [settings.autoHideChrome, hovered, panel]);
+  const collapsed = settings.autoHideChrome && !expanded && panel === "none";
 
   const active = usage.source !== "error" && usage.active && usage.lastEvent !== null && clock - usage.lastEvent <= 12000;
   // The main process already smooths (EMA) and zeroes the speed; no extra cutoff here.
   const speed = usage.source !== "error" ? usage.speed : 0;
   const running = usage.source !== "error" && usage.running;
-  const mood = speed >= 80 ? "fast" : active || running ? "working" : "idle";
   const status = usage.source === "error" ? "读取失败" : usage.source === "waiting" ? "等待 Codex" : running ? "正在工作" : active ? "正在更新" : "待机中";
   const speedLabel = speed >= 10 ? speed.toFixed(0) : speed.toFixed(1);
-  const update = (patch: Partial<PetSettings>) => {
+  const update = (patch: Partial<AppSettings>) => {
     setSettings((current) => ({ ...current, ...patch }));
     window.speedPet?.updateSettings(patch).then(setSettings);
   };
-  const choosePet = () => { window.speedPet?.choosePetImage().then(setSettings); };
-  const clearPet = () => { window.speedPet?.clearPetImage().then(setSettings); };
   const checkUpdate = () => { setUpdateStatus((s) => ({ ...s, state: "checking" })); window.speedPet?.checkUpdate().then(setUpdateStatus); };
   const installUpdate = () => { window.speedPet?.installUpdate().then(setUpdateStatus); };
   const resetHistory = () => {
@@ -226,17 +182,32 @@ export default function App() {
     : updateStatus.state === "error" ? updateStatus.message || "检查更新失败"
     : updateStatus.state === "unsupported" ? "当前环境不支持更新"
     : `当前版本 v${appInfo.version || "-"}`;
-  const scale = SIZE_SCALE[settings.viewSize ?? settings.size] || 1;
-  const customPetKind = settings.petImage && settings.petImage.toLowerCase().split("?")[0].endsWith(".gif") ? "自定义 GIF" : "自定义图片";
+  const viewSize = settings.viewSize ?? settings.size;
+  const scale = SIZE_SCALE[viewSize] || 1;
+
+  // Measure layout pixels before CSS zoom so Electron gets the physical size,
+  // including wrapped text, panels, and both folded and expanded states.
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const reportSize = () => window.speedPet?.setContentSize({
+      viewSize, height: Math.ceil(viewport.offsetHeight * scale)
+    });
+    const observer = new ResizeObserver(reportSize);
+    observer.observe(viewport);
+    reportSize();
+    return () => observer.disconnect();
+  }, [viewSize, scale, collapsed, panel]);
 
   // Layout zoom keeps text crisp when live usage updates repaint the window.
-  return <div className="viewport" style={{ zoom: scale }}><main
-    className={`shell view-${settings.viewSize ?? settings.size} ${settings.reducedMotion ? "reduce-motion" : ""} ${chromeHidden ? "chrome-hidden" : ""}`}
-    onMouseEnter={() => { hoverRef.current = true; showChrome(); }}
-    onMouseLeave={() => { hoverRef.current = false; scheduleChromeHide(); }}
-    onClick={showChrome}>
+  return <div ref={viewportRef} className="viewport" style={{ zoom: scale, "--text-scale": Math.max(1, 1 / scale) } as CSSProperties}><main
+    className={`shell view-${viewSize} ${settings.reducedMotion ? "reduce-motion" : ""} ${collapsed ? "is-collapsed" : ""}`}
+    onMouseEnter={() => { hasHovered.current = true; setHovered(true); setExpanded(true); }}
+    onMouseLeave={() => setHovered(false)}
+    onClick={() => setExpanded(true)}>
+    <div className="window-header">
     <div className="topbar">
-      <div className="brand"><span className="brand-icon">✦</span><span>CODEX <strong>{settings.style === "gauge" ? "DRIVE" : "PET"}</strong></span></div>
+      <div className="brand"><span className="brand-icon">✦</span><span>CODEX <strong>DRIVE</strong></span></div>
       <div className="window-actions">
         <button type="button" className="icon-button" title="设置" aria-label="设置" onClick={() => setPanel(panel === "settings" ? "none" : "settings")}>⚙</button>
         <button type="button" className="icon-button" title="隐藏到托盘" aria-label="隐藏到托盘" onClick={() => window.speedPet?.hide()}>−</button>
@@ -244,14 +215,25 @@ export default function App() {
     </div>
 
     <div className="status"><span className={`status-light ${active || running ? "lit" : ""}`} /><span>{status}</span><span className="status-right">LOCAL</span></div>
-    {settings.style === "gauge" ? <Gauge speed={speed} /> : <Pet mood={mood} image={settings.petImage} />}
+    </div>
+    <Gauge speed={speed} />
 
+    <div className="statistics">
     <button type="button" className="speed-card" onClick={() => setPanel(panel === "details" ? "none" : "details")} title="查看统计详情">
       <div className="speed-top"><span>输出速度</span><span className="live-tag">平滑</span></div>
       <div className="speed-number"><strong>{speedLabel}</strong><span>token/s</span></div>
       <div className="today-line"><span>今日累计</span><strong>{shortCount(usage.total)} <small>token</small></strong></div>
       <div className="history-line"><span>历史累计</span><strong>{shortCount(usage.historyTotal)} <small>token</small></strong></div>
     </button>
+
+    <section className="quota-card" aria-label="Codex 剩余额度">
+      <div className="quota-title"><span>剩余额度</span><span title={usage.rateLimits ? `额度数据更新于 ${new Date(usage.rateLimits.updatedAt).toLocaleString("zh-CN")}` : "开始使用 Codex 后自动读取额度"}>
+        {usage.source === "error" ? "读取失败" : usage.rateLimits ? lastSeen(usage.rateLimits.updatedAt).slice(0, 5) : "等待同步"}
+      </span></div>
+      <QuotaRow label="5 小时" quota={usage.rateLimits?.fiveHour ?? null} now={clock} />
+      <QuotaRow label="一周" quota={usage.rateLimits?.weekly ?? null} now={clock} />
+    </section>
+    </div>
 
     {panel !== "none" && <div className="overlay">
       <div className="panel-head"><strong>{panel === "details" ? "用量详情" : "偏好设置"}</strong><button type="button" className="panel-close" aria-label="关闭" onClick={() => setPanel("none")}>×</button></div>
@@ -264,22 +246,11 @@ export default function App() {
         <div className="detail-row"><span>最后更新</span><strong>{lastSeen(usage.lastEvent)}</strong></div>
         <div className="detail-row"><span>上轮平均速度</span><strong>{usage.turnSpeed === null ? "暂无" : `${usage.turnSpeed >= 10 ? usage.turnSpeed.toFixed(0) : usage.turnSpeed.toFixed(1)} token/s`}</strong></div>
         {usage.turnTokens !== null && usage.turnSeconds !== null && <div className="detail-row"><span>上轮规模</span><strong>{fullCount(usage.turnTokens)} token / {usage.turnSeconds} 秒</strong></div>}
+        <div className="detail-row"><span>额度更新</span><strong>{usage.rateLimits ? resetTime(usage.rateLimits.updatedAt) : "暂无数据"}</strong></div>
+        <p className="panel-note">额度为本机日志中最新的 Codex 账户快照，随 Codex 用量事件更新。到达重置时间后等待新数据确认；重置历史累计不影响账户额度。</p>
         <p className="panel-note">统计本机 Codex 会话。速度为近期输出 token 的指数加权均值（τ≈15 秒）；上轮平均速度 = 最近一轮的输出 token ÷ 轮耗时。输入已包含缓存 token。</p>
         {usage.error && <p className="error-note">{usage.error}</p>}
       </> : <>
-        <div className="settings-section">外观</div>
-        <div className="preference-choice"><span>显示款式</span><div className="segmented" role="group" aria-label="显示款式">
-          <button type="button" aria-pressed={settings.style === "pet"} onClick={() => update({ style: "pet" })}>宠物</button>
-          <button type="button" aria-pressed={settings.style === "gauge"} onClick={() => update({ style: "gauge" })}>汽车仪表盘</button>
-        </div></div>
-        <div className="pet-image-row">
-          {settings.petImage
-            ? <img className="pet-image-preview" src={petImageUrl(settings.petImage)} alt="自定义宠物预览" />
-            : <span className="pet-image-preview pet-image-empty">内置</span>}
-          <div className="pet-image-info"><span>宠物图片</span><small>{settings.petImage ? customPetKind : "内置小绿宠"}</small></div>
-          <button type="button" className="mini-button" title="选择 GIF 或图片" onClick={choosePet} disabled={!window.speedPet}>更换</button>
-          {settings.petImage && <button type="button" className="mini-button" title="恢复内置宠物" onClick={clearPet} disabled={!window.speedPet}>恢复</button>}
-        </div>
         <div className="settings-section">窗口</div>
         <div className="preference-choice"><span>窗口大小</span><div className="segmented" role="group" aria-label="窗口大小">
           <button type="button" aria-pressed={settings.size === "small"} onClick={() => update({ size: "small" })}>小</button>
@@ -288,7 +259,7 @@ export default function App() {
         </div></div>
         <Toggle label="始终置顶" checked={settings.alwaysOnTop} onChange={(alwaysOnTop) => update({ alwaysOnTop })} />
         <Toggle label="减少动画" checked={settings.reducedMotion} onChange={(reducedMotion) => update({ reducedMotion })} />
-        <Toggle label="自动隐藏标题栏" checked={settings.autoHideChrome} onChange={(autoHideChrome) => update({ autoHideChrome })} />
+        <Toggle label="自动折叠窗口" checked={settings.autoHideChrome} onChange={(autoHideChrome) => update({ autoHideChrome })} />
         <div className="settings-section">系统</div>
         {appInfo.updateEnabled && <div className="update-row">
           <div className="update-info"><span>版本更新</span><small className={updateStatus.state === "error" ? "update-error" : updateStatus.state === "available" ? "update-highlight" : ""}>{updateLabel}</small></div>
@@ -303,7 +274,7 @@ export default function App() {
           {confirmHistoryReset && <button type="button" className="mini-button" onClick={() => setConfirmHistoryReset(false)}>取消</button>}
           <button type="button" className="mini-button" onClick={resetHistory} disabled={!window.speedPet}>{confirmHistoryReset ? "确认重置" : "重置"}</button>
         </div>
-        <p className="panel-note settings-note">拖动顶部移动。隐藏后可从托盘打开。打开面板时窗口会临时放大，关闭后恢复所选大小。</p>
+        <p className="panel-note settings-note">拖动顶部移动。平时保留仪表盘、速度与累计，鼠标移入展开标题和额度。设置和详情打开时保持展开。</p>
         <button type="button" className="quit-button" onClick={() => window.speedPet?.quit()}>退出应用</button>
       </>}
       </div>

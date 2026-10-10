@@ -4,6 +4,17 @@ param([string]$Notes = "")
 
 $ErrorActionPreference = 'Stop'
 
+function Get-ReleaseSha256([string]$FilePath) {
+  $stream = [System.IO.File]::OpenRead($FilePath)
+  $hasher = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    return [System.BitConverter]::ToString($hasher.ComputeHash($stream)).Replace('-', '')
+  } finally {
+    $hasher.Dispose()
+    $stream.Dispose()
+  }
+}
+
 # ==================== 局域网共享目录（唯一配置点：electron/update-share.json）====================
 $shareConfigPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'electron\update-share.json'
 if (-not (Test-Path -LiteralPath $shareConfigPath)) { throw "缺少配置文件：$shareConfigPath" }
@@ -51,7 +62,7 @@ try {
     $source = Join-Path $root "release\$name"
     $destination = Join-Path $Share $name
     if ((Get-Item -LiteralPath $source).Length -ne (Get-Item -LiteralPath $destination).Length -or
-        (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash) {
+        (Get-ReleaseSha256 $source) -ne (Get-ReleaseSha256 $destination)) {
       throw "共享目录文件校验失败：$name"
     }
   }

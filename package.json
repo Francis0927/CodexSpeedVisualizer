@@ -1,8 +1,8 @@
 {
   "name": "codex-speed-pet",
-  "version": "0.4.0",
+  "version": "0.5.3",
   "private": true,
-  "description": "A local Codex token speed desktop pet",
+  "description": "A local Codex token speed car dashboard",
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
@@ -11,7 +11,8 @@
     "test": "node --test tests/usage.test.cjs",
     "dist:portable": "npm run build && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-portable.ps1",
     "dist": "npm run build && electron-builder --win nsis",
-    "publish:share": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/publish-share.ps1"
+    "publish:share": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/publish-share.ps1",
+    "test:window": "npm run build && electron tests/window.test.cjs"
   },
   "dependencies": {
     "react": "^18.3.1",

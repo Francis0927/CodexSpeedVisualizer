@@ -29,6 +29,22 @@ function readUsage(raw) {
   return { input, output };
 }
 
+function readRateLimits(raw, timestamp) {
+  if (!raw || typeof raw !== "object") return null;
+  // Model-specific buckets must not replace the shared Codex quota.
+  if (raw.limit_id != null && raw.limit_id !== "codex") return null;
+  const limits = { updatedAt: timestamp, fiveHour: null, weekly: null };
+  for (const window of [raw.primary, raw.secondary]) {
+    if (!window || !Number.isFinite(window.used_percent)) continue;
+    const key = window.window_minutes === 300 ? "fiveHour" : window.window_minutes === 10080 ? "weekly" : null;
+    if (!key) continue;
+    const resetsAt = Number.isFinite(window.resets_at) && window.resets_at > 0 && window.resets_at <= 8.64e12
+      ? window.resets_at * 1000 : null;
+    limits[key] = { remainingPercent: Math.max(0, Math.min(100, 100 - window.used_percent)), resetsAt };
+  }
+  return limits.fiveHour || limits.weekly ? limits : null;
+}
+
 function newFileState() {
   return {
     offset: 0,
@@ -36,6 +52,7 @@ function newFileState() {
     records: [],
     counters: [],
     lifecycle: [],
+    rateLimits: null,
     previousCounter: null,
     lineNumber: 0
   };
@@ -62,6 +79,9 @@ function acceptLine(state, line) {
       id: entry.payload?.response_id || `line:${state.lineNumber}`
     });
   } else if (entry.type === "event_msg" && entry.payload?.type === "token_count") {
+    // Quota-only updates and repeated token counters are still meaningful.
+    const limits = readRateLimits(entry.payload?.rate_limits, timestamp);
+    if (limits && (!state.rateLimits || limits.updatedAt >= state.rateLimits.updatedAt)) state.rateLimits = limits;
     const usage = readUsage(entry.payload?.info?.total_token_usage);
     if (!usage) return;
     const prev = state.previousCounter;
@@ -164,8 +184,10 @@ class UsageCollector {
     let eventCount = 0;
     let running = false;
     let lastTurn = null;
+    let rateLimits = null;
     const seen = new Set();
     for (const [file, state] of this.files) {
+      if (state.rateLimits && (!rateLimits || state.rateLimits.updatedAt > rateLimits.updatedAt)) rateLimits = state.rateLimits;
       const latestLife = state.lifecycle[state.lifecycle.length - 1];
       if (latestLife?.type === "task_started" && now - latestLife.timestamp < 2 * 60 * 60 * 1000) running = true;
       const events = state.records.length ? state.records : state.counters;
@@ -208,6 +230,7 @@ class UsageCollector {
       output,
       total: input + output,
       historyTotal,
+      rateLimits,
       speed,
       turnSpeed: lastTurn ? lastTurn.speed : null,
       turnTokens: lastTurn ? lastTurn.tokens : null,

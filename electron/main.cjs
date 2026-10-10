@@ -1,7 +1,6 @@
-const { app, BrowserWindow, Tray, Menu, ipcMain, screen, nativeImage, dialog, protocol, net } = require("electron");
+const { app, BrowserWindow, Tray, Menu, ipcMain, screen, nativeImage } = require("electron");
 const fs = require("node:fs");
 const path = require("node:path");
-const { pathToFileURL } = require("node:url");
 const { UsageCollector } = require("./usage.cjs");
 const updater = require("./update.cjs");
 
@@ -11,49 +10,30 @@ let window = null;
 let tray = null;
 const SIZES = { small: 0.55, medium: 0.82, large: 1.05 };
 const PANEL_MIN_SIZE = "medium";
-const PET_IMAGE_EXTENSIONS = new Set([".gif", ".png", ".jpg", ".jpeg", ".webp", ".apng"]);
-const MAX_PET_IMAGE_BYTES = 25 * 1024 * 1024;
-let settings = { alwaysOnTop: true, reducedMotion: false, launchAtLogin: false, style: "pet", size: "medium", petImage: null, autoHideChrome: true, position: null };
+let settings = { alwaysOnTop: true, reducedMotion: false, launchAtLogin: false, size: "medium", autoHideChrome: true, position: null };
 let panelOpen = false;
-// When the renderer auto-hides the chrome (title bar + status row), the window
-// shrinks by CHROME_HEIGHT so no blank space is left behind.
-let chromeHidden = false;
-let chromeResizeTimer = null;
-const CHROME_HEIGHT = 68;
 let quitting = false;
 let savePositionTimer = null;
 
-// Custom scheme that serves the user-selected pet GIF/image from the user data
-// directory. Works in dev, packaged, and asar builds regardless of CSP rules.
-protocol.registerSchemesAsPrivileged([
-  { scheme: "speedpet", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }
-]);
-
 function settingsPath() { return path.join(app.getPath("userData"), "settings.json"); }
-function petDir() { return path.join(app.getPath("userData"), "pet"); }
 
 function loadSettings() {
-  try { settings = { ...settings, ...JSON.parse(fs.readFileSync(settingsPath(), "utf8")) }; }
-  catch { /* First launch or invalid settings. */ }
-  if (!["pet", "gauge"].includes(settings.style)) settings.style = "pet";
-  if (!(settings.size in SIZES)) settings.size = "medium";
-  // Keep the custom pet image only when the file still exists; drop orphan files.
+  let migrated = false;
   try {
-    const name = typeof settings.petImage === "string" ? path.basename(settings.petImage) : null;
-    const dir = petDir();
-    const keep = name && fs.existsSync(path.join(dir, name)) ? name : null;
-    if (fs.existsSync(dir)) {
-      for (const file of fs.readdirSync(dir)) {
-        if (file !== keep) { try { fs.unlinkSync(path.join(dir, file)); } catch { /* Ignore locked files. */ } }
-      }
-    }
-    settings.petImage = keep;
-  } catch { settings.petImage = null; }
+    const saved = JSON.parse(fs.readFileSync(settingsPath(), "utf8"));
+    // Retire display-mode/image preferences while retaining all other settings.
+    migrated = Object.hasOwn(saved, "style") || Object.hasOwn(saved, "petImage");
+    const { style, petImage, ...current } = saved;
+    settings = { ...settings, ...current };
+  } catch { /* First launch or invalid settings. */ }
+  if (!Object.hasOwn(SIZES, settings.size)) settings.size = "medium";
+  if (migrated) saveSettings();
 }
 
 function dimensions(size) {
   const scale = SIZES[size] || 1;
-  return { width: Math.round(272 * scale), height: Math.round((chromeHidden ? 360 - CHROME_HEIGHT : 360) * scale) };
+  // Initial bounds only; the renderer reports the exact content height.
+  return { width: Math.round(272 * scale), height: Math.ceil(560 * scale) };
 }
 
 // Panels (settings/details) stay readable: while one is open, the window never
@@ -62,17 +42,20 @@ function effectiveSize() {
   return panelOpen && SIZES[settings.size] < SIZES[PANEL_MIN_SIZE] ? PANEL_MIN_SIZE : settings.size;
 }
 
-function resizeWindow(size) {
+function resizeWindow(width, height) {
   if (!window || window.isDestroyed()) return;
-  const { width, height } = dimensions(size);
   const old = window.getBounds();
+  if (old.width === width && old.height === height) return;
   const area = screen.getDisplayMatching(old).workArea;
   const x = Math.max(area.x, Math.min(area.x + area.width - width, old.x + old.width - width));
   const y = Math.max(area.y, Math.min(area.y + area.height - height, old.y + old.height - height));
   window.setBounds({ x, y, width, height });
 }
 
-function applyWindowSize() { resizeWindow(effectiveSize()); }
+function setContentSize(size) {
+  if (!size || size.viewSize !== effectiveSize() || !Number.isInteger(size.height) || size.height < 60 || size.height > 2000) return;
+  resizeWindow(Math.round(272 * SIZES[effectiveSize()]), size.height);
+}
 
 function saveSettings() {
   fs.mkdirSync(app.getPath("userData"), { recursive: true });
@@ -93,13 +76,10 @@ function broadcastSettings() {
 
 function updateSettings(patch) {
   if (!patch || typeof patch !== "object") return settingsPayload();
-  const previousSize = settings.size;
   for (const key of ["alwaysOnTop", "reducedMotion", "launchAtLogin", "autoHideChrome"]) {
     if (typeof patch[key] === "boolean") settings[key] = patch[key];
   }
-  if (["pet", "gauge"].includes(patch.style)) settings.style = patch.style;
   if (Object.hasOwn(SIZES, patch.size)) settings.size = patch.size;
-  if (previousSize !== settings.size) applyWindowSize();
   if (process.platform === "win32" && app.isPackaged) {
     app.setLoginItemSettings({ openAtLogin: settings.launchAtLogin });
   }
@@ -112,61 +92,7 @@ function setPanelOpen(open) {
   const next = open === true;
   if (panelOpen === next) return;
   panelOpen = next;
-  applyWindowSize();
   broadcastSettings();
-}
-
-function setChromeHidden(hidden) {
-  const next = hidden === true;
-  if (chromeHidden === next) return;
-  chromeHidden = next;
-  if (chromeResizeTimer) { clearTimeout(chromeResizeTimer); chromeResizeTimer = null; }
-  if (next) {
-    // Let the CSS collapse play out (shell is transparent below) before
-    // shrinking the actual window to fit.
-    chromeResizeTimer = setTimeout(applyWindowSize, 250);
-  } else {
-    applyWindowSize();
-  }
-}
-
-async function choosePetImage() {
-  if (!window || window.isDestroyed()) return settingsPayload();
-  const result = await dialog.showOpenDialog(window, {
-    title: "选择宠物图片",
-    filters: [
-      { name: "GIF / 图片", extensions: ["gif", "png", "jpg", "jpeg", "webp", "apng"] },
-      { name: "所有文件", extensions: ["*"] }
-    ],
-    properties: ["openFile"]
-  });
-  const source = result.canceled ? null : result.filePaths[0];
-  if (!source) return settingsPayload();
-  try {
-    const ext = path.extname(source).toLowerCase();
-    if (!PET_IMAGE_EXTENSIONS.has(ext)) return settingsPayload();
-    if (fs.statSync(source).size > MAX_PET_IMAGE_BYTES) return settingsPayload();
-    fs.mkdirSync(petDir(), { recursive: true });
-    const name = `pet-${Date.now()}${ext}`;
-    fs.copyFileSync(source, path.join(petDir(), name));
-    if (settings.petImage) {
-      try { fs.unlinkSync(path.join(petDir(), settings.petImage)); } catch { /* Old file already gone. */ }
-    }
-    settings.petImage = name;
-    saveSettings();
-    broadcastSettings();
-  } catch { /* Keep the previous pet image on any failure. */ }
-  return settingsPayload();
-}
-
-function clearPetImage() {
-  if (settings.petImage) {
-    try { fs.unlinkSync(path.join(petDir(), settings.petImage)); } catch { /* Old file already gone. */ }
-    settings.petImage = null;
-    saveSettings();
-    broadcastSettings();
-  }
-  return settingsPayload();
 }
 
 function createWindow() {
@@ -221,21 +147,13 @@ function rebuildTrayMenu() {
       rebuildTrayMenu();
     } },
     { label: "始终置顶", type: "checkbox", checked: settings.alwaysOnTop, click: (item) => updateSettings({ alwaysOnTop: item.checked }) },
-    { label: "显示款式", submenu: [
-      { label: "宠物", type: "radio", checked: settings.style === "pet", click: () => updateSettings({ style: "pet" }) },
-      { label: "汽车仪表盘", type: "radio", checked: settings.style === "gauge", click: () => updateSettings({ style: "gauge" }) }
-    ] },
-    { label: "宠物图片", submenu: [
-      { label: "更换 GIF / 图片…", click: () => { window?.show(); choosePetImage(); } },
-      { label: "恢复默认宠物", enabled: !!settings.petImage, click: () => clearPetImage() }
-    ] },
     { label: "窗口大小", submenu: [
       { label: "小", type: "radio", checked: settings.size === "small", click: () => updateSettings({ size: "small" }) },
       { label: "中", type: "radio", checked: settings.size === "medium", click: () => updateSettings({ size: "medium" }) },
       { label: "大", type: "radio", checked: settings.size === "large", click: () => updateSettings({ size: "large" }) }
     ] },
     { label: "减少动画", type: "checkbox", checked: settings.reducedMotion, click: (item) => updateSettings({ reducedMotion: item.checked }) },
-    { label: "自动隐藏标题栏", type: "checkbox", checked: settings.autoHideChrome, click: (item) => updateSettings({ autoHideChrome: item.checked }) },
+    { label: "自动折叠窗口", type: "checkbox", checked: settings.autoHideChrome, click: (item) => updateSettings({ autoHideChrome: item.checked }) },
     { label: "开机启动", type: "checkbox", checked: settings.launchAtLogin, click: (item) => updateSettings({ launchAtLogin: item.checked }) },
     { label: "检查更新", click: () => {
       updater.checkForUpdate().then((result) => {
@@ -250,24 +168,12 @@ function rebuildTrayMenu() {
 function createTray() {
   const icon = nativeImage.createFromPath(path.join(__dirname, "..", "assets", "icon.png"));
   tray = new Tray(icon.resize({ width: 20, height: 20 }));
-  tray.setToolTip("Codex Speed Pet");
+  tray.setToolTip("Codex Drive");
   tray.on("double-click", () => { window?.show(); window?.focus(); rebuildTrayMenu(); });
   rebuildTrayMenu();
 }
 
 app.whenReady().then(() => {
-  protocol.handle("speedpet", (request) => {
-    try {
-      const url = new URL(request.url);
-      if (url.hostname !== "pet") return new Response("Not found", { status: 404 });
-      const name = path.basename(decodeURIComponent(url.pathname));
-      const file = path.join(petDir(), name);
-      if (!name || !fs.existsSync(file)) return new Response("Not found", { status: 404 });
-      return net.fetch(pathToFileURL(file).toString());
-    } catch {
-      return new Response("Not found", { status: 404 });
-    }
-  });
   loadSettings();
   collector.historyResetAt = Number.isFinite(settings.historyResetAt) && settings.historyResetAt >= 0 ? settings.historyResetAt : 0;
   createWindow();
@@ -282,10 +188,8 @@ app.whenReady().then(() => {
     saveSettings();
     return collector.resetHistory(settings.historyResetAt);
   });
-  ipcMain.handle("app:choosePetImage", () => choosePetImage());
-  ipcMain.handle("app:clearPetImage", () => clearPetImage());
   ipcMain.on("app:panel", (_event, open) => setPanelOpen(open));
-  ipcMain.on("app:chrome", (_event, hidden) => setChromeHidden(hidden));
+  ipcMain.on("app:contentSize", (_event, size) => setContentSize(size));
   ipcMain.handle("app:checkUpdate", () => updater.checkForUpdate());
   ipcMain.handle("app:installUpdate", () => updater.installUpdate());
   ipcMain.on("app:hide", () => { window?.hide(); rebuildTrayMenu(); });

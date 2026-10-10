@@ -1,3 +1,15 @@
+export type QuotaWindow = {
+  remainingPercent: number;
+  /** Reset time in milliseconds since epoch, null when unavailable. */
+  resetsAt: number | null;
+};
+
+export type RateLimits = {
+  updatedAt: number;
+  fiveHour: QuotaWindow | null;
+  weekly: QuotaWindow | null;
+};
+
 export type UsageSnapshot = {
   day: string | null;
   input: number;
@@ -5,6 +17,8 @@ export type UsageSnapshot = {
   total: number;
   /** Tokens across locally available sessions since the last manual reset. */
   historyTotal: number;
+  /** Latest shared Codex quota reported in local session logs. */
+  rateLimits: RateLimits | null;
   speed: number;
   /** Average rate of the most recent completed turn (output tokens / turn seconds), null when unknown. */
   turnSpeed: number | null;
@@ -20,15 +34,12 @@ export type UsageSnapshot = {
   error: string | null;
 };
 
-export type PetSettings = {
+export type AppSettings = {
   alwaysOnTop: boolean;
   reducedMotion: boolean;
   launchAtLogin: boolean;
-  style: "pet" | "gauge";
   size: "small" | "medium" | "large";
-  /** Custom pet image file name inside the user-data pet folder, or null for the built-in pet. */
-  petImage: string | null;
-  /** Auto-hide the title bar / status row until hover or click. */
+  /** Fold to the dial until hover or click; retains the legacy setting key. */
   autoHideChrome: boolean;
   /**
    * Size the renderer should draw at right now. Sent by the main process with
@@ -57,19 +68,17 @@ export type AppInfo = {
 declare global {
   interface Window {
     speedPet?: {
-      getInitial(): Promise<{ usage: UsageSnapshot; settings: PetSettings; appInfo: AppInfo }>;
-      updateSettings(patch: Partial<PetSettings>): Promise<PetSettings>;
+      getInitial(): Promise<{ usage: UsageSnapshot; settings: AppSettings; appInfo: AppInfo }>;
+      updateSettings(patch: Partial<AppSettings>): Promise<AppSettings>;
       resetHistory(): Promise<UsageSnapshot>;
-      choosePetImage(): Promise<PetSettings>;
-      clearPetImage(): Promise<PetSettings>;
       setPanelOpen(open: boolean): void;
-      setChromeHidden(hidden: boolean): void;
+      setContentSize(size: { viewSize: AppSettings["size"]; height: number }): void;
       checkUpdate(): Promise<UpdateStatus>;
       installUpdate(): Promise<UpdateStatus>;
       hide(): void;
       quit(): void;
       onUsage(callback: (usage: UsageSnapshot) => void): () => void;
-      onSettings(callback: (settings: PetSettings) => void): () => void;
+      onSettings(callback: (settings: AppSettings) => void): () => void;
       onUpdateStatus(callback: (status: UpdateStatus) => void): () => void;
     };
   }
