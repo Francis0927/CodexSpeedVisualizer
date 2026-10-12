@@ -61,6 +61,7 @@ try {
     node (Join-Path $PSScriptRoot 'verify-no-update.cjs') (Join-Path $output 'win-unpacked\resources\app.asar') $version
     if ($LASTEXITCODE -ne 0) { throw 'Existing no-update archive verification failed.' }
     Export-GitHubUploadDirectory $index.assets
+    & (Join-Path $PSScriptRoot 'prune-local-releases.ps1') -CurrentVersion $version -Mode NoUpdate
     Write-Output "Reused verified no-update artifacts: $output"
     return
   }
@@ -119,6 +120,7 @@ try {
   $index = @{ version = $version; sourceHash = $sourceHash; assets = @($assets) }
   [IO.File]::WriteAllText($indexPath, ($index | ConvertTo-Json -Depth 10), (New-Object Text.UTF8Encoding $false))
   Export-GitHubUploadDirectory $assets
+  & (Join-Path $PSScriptRoot 'prune-local-releases.ps1') -CurrentVersion $version -Mode NoUpdate
   Write-Output "Built and verified no-update artifacts: $output"
 } finally {
   Pop-Location

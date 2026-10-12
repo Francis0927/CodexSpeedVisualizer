@@ -1,5 +1,5 @@
-// Real Windows z-order regression: another topmost app covers the dashboard,
-// then the guard restores it while leaving keyboard focus in the other app.
+// Real Windows z-order regression: a screenshot-like topmost overlay must stay
+// above the dashboard, while ordinary windows remain below it.
 const { app, BrowserWindow } = require("electron");
 const assert = require("node:assert/strict");
 const { execFileSync } = require("node:child_process");
@@ -48,9 +48,18 @@ app.whenReady().then(async () => {
   const covered = nativeState(pet, blocker);
   assert.equal(covered.petAbove, false, "the other topmost app must initially cover the pet");
   await sleep(1200);
-  const recovered = nativeState(pet, blocker);
-  assert.equal(recovered.petAbove, true, "periodic recovery must restore native z-order");
-  assert.equal(recovered.foreground, covered.foreground, "recovery must preserve foreground focus");
+  guard.apply(true);
+  pet.emit("blur");
+  await sleep(1200);
+  const overlay = nativeState(pet, blocker);
+  assert.equal(overlay.petAbove, false, "timer, blur and settings updates must leave the screenshot overlay above the pet");
+  // The user may switch apps while this desktop test runs. Maintenance must
+  // never activate the dashboard, even when another app becomes foreground.
+  assert.notEqual(overlay.foreground, pet.getNativeWindowHandle().readBigUInt64LE().toString(), "maintenance must not steal foreground focus");
+  assert.equal(pet.isAlwaysOnTop(), true, "dashboard must retain ordinary topmost behavior");
+  blocker.setAlwaysOnTop(false); blocker.moveTop();
+  assert.equal(nativeState(pet, blocker).petAbove, true, "a normal window must stay below the dashboard");
+  blocker.setAlwaysOnTop(true, "screen-saver"); blocker.moveTop();
   pet.setAlwaysOnTop(false);
   await sleep(1200);
   assert.equal(pet.isAlwaysOnTop(), true, "lost topmost flag must recover");
@@ -64,6 +73,6 @@ app.whenReady().then(async () => {
   pet.showInactive();
   assert.equal(nativeState(pet, blocker).petAbove, true, "show must restore z-order immediately");
   guard.dispose(); pet.destroy(); blocker.destroy();
-  console.log("Native Windows z-order recovery, foreground focus, lost flag, disabled setting and hide/show: passed");
+  console.log("Native Windows screenshot overlay z-order, ordinary topmost, foreground focus, lost flag, disabled setting and hide/show: passed");
   app.quit();
 }).catch(error => { guard?.dispose(); console.error(error); app.exit(1); });

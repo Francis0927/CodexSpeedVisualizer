@@ -26,19 +26,22 @@ function fixture() {
   return { window, guard, active, tick };
 }
 
-test("repairs lost topmost flag and raises above later topmost apps without focusing", () => {
+test("repairs lost topmost flag without raising over screenshot overlays or focusing", () => {
   const { window, guard, active, tick } = fixture();
   guard.apply(true);
-  assert.deepEqual(window.calls, [[true, "screen-saver"]]);
+  assert.deepEqual(window.calls, [[true, "floating"]]);
   assert.equal(active.size, 0);
   window.visible = true; window.emit("show");
   assert.equal(active.size, 1);
   assert.equal(window.raised, 1);
-  tick(); assert.equal(window.raised, 2);
+  tick(); assert.equal(window.raised, 1);
   window.topmost = false;
   tick(); assert.equal(window.topmost, true);
-  window.emit("blur"); assert.equal(window.raised, 4);
+  window.emit("blur"); assert.equal(window.raised, 1);
+  const calls = window.calls.length;
   guard.apply(true); window.emit("show");
+  assert.equal(window.raised, 1, "settings updates must not raise over a screenshot overlay");
+  assert.equal(window.calls.length, calls, "reapplying settings must not reset native z-order");
   assert.equal(active.size, 1, "reapplying settings must not accumulate timers");
   guard.dispose();
 });

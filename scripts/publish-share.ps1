@@ -25,8 +25,15 @@ if ([string]::IsNullOrWhiteSpace($Share)) { throw 'electron/update-share.json �
 $root = [System.IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 Push-Location $root
 try {
-  if (Get-Process -Name 'Codex Speed Pet' -ErrorAction SilentlyContinue) {
-    throw '检测到正在运行的 Codex Speed Pet，请先关闭（便携版目录会被重建），再运行本脚本。'
+  # Installer builds replace win-unpacked. Portable packages use a fresh stage,
+  # so an app running from a separate portable directory can safely stay open.
+  $installerBuildDirectory = Join-Path $root 'release\win-unpacked'
+  $installerBuildPrefix = $installerBuildDirectory + [IO.Path]::DirectorySeparatorChar
+  $busyInstallerBuild = @(Get-CimInstance Win32_Process | Where-Object {
+    $_.ExecutablePath -and $_.ExecutablePath.StartsWith($installerBuildPrefix, [StringComparison]::OrdinalIgnoreCase)
+  })
+  if ($busyInstallerBuild.Count -gt 0) {
+    throw '检测到正在从 release\win-unpacked 运行的应用，请先退出该应用，再发布。'
   }
   if (-not (Test-Path -LiteralPath $Share)) { throw "共享目录不可访问：$Share" }
   $version = (Get-Content -LiteralPath (Join-Path $root 'package.json') -Raw | ConvertFrom-Json).version
