@@ -1,6 +1,16 @@
 ﻿param([switch]$SkipRendererBuild)
 
 $ErrorActionPreference = 'Stop'
+
+# Nested Windows PowerShell may not have Get-FileHash available through module
+# auto-loading. Hash directly with .NET, as the shared-release verifier does.
+function Get-PackageFileHash([string]$LiteralPath) {
+  $stream = [IO.File]::OpenRead($LiteralPath)
+  $hasher = [Security.Cryptography.SHA256]::Create()
+  try { return [pscustomobject]@{ Hash = [BitConverter]::ToString($hasher.ComputeHash($stream)).Replace('-', '') } }
+  finally { $stream.Dispose(); $hasher.Dispose() }
+}
+
 $root = [System.IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 $packagePath = Join-Path $root 'package.json'
 $package = Get-Content -LiteralPath $packagePath -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -8,7 +18,7 @@ $version = $package.version
 if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid release version.' }
 $output = Join-Path $root "release\no-update-$version"
 $privateConfig = Join-Path $root 'electron\update-share.json'
-$configHash = if (Test-Path -LiteralPath $privateConfig) { (Get-FileHash -LiteralPath $privateConfig).Hash } else { $null }
+$configHash = if (Test-Path -LiteralPath $privateConfig) { (Get-PackageFileHash -LiteralPath $privateConfig).Hash } else { $null }
 
 function Export-GitHubUploadDirectory($assets) {
   $upload = Join-Path $root "release\GitHub-Release-v$version"
@@ -22,9 +32,9 @@ function Export-GitHubUploadDirectory($assets) {
   foreach ($asset in $assets) {
     $destination = Join-Path $upload $asset.name
     if (Test-Path -LiteralPath $destination) {
-      if ((Get-FileHash -LiteralPath $destination).Hash.ToLowerInvariant() -ne $asset.sha256) { throw 'Existing upload attachment differs; it will not be overwritten.' }
+      if ((Get-PackageFileHash -LiteralPath $destination).Hash.ToLowerInvariant() -ne $asset.sha256) { throw 'Existing upload attachment differs; it will not be overwritten.' }
     } else { Copy-Item -LiteralPath (Join-Path $output $asset.name) -Destination $destination }
-    if ((Get-FileHash -LiteralPath $destination).Hash.ToLowerInvariant() -ne $asset.sha256) { throw 'Upload attachment checksum mismatch.' }
+    if ((Get-PackageFileHash -LiteralPath $destination).Hash.ToLowerInvariant() -ne $asset.sha256) { throw 'Upload attachment checksum mismatch.' }
   }
   Write-Output "GitHub upload folder (select all 4 files): $upload"
 }
@@ -45,7 +55,7 @@ try {
   }
   $sourceDescription = @($package.name, $version, $package.description, $package.main)
   foreach ($file in $inputs | Sort-Object FullName) {
-    $sourceDescription += $file.FullName.Substring($root.Length + 1).Replace('\', '/') + ':' + (Get-FileHash -LiteralPath $file.FullName).Hash
+    $sourceDescription += $file.FullName.Substring($root.Length + 1).Replace('\', '/') + ':' + (Get-PackageFileHash -LiteralPath $file.FullName).Hash
   }
   $hasher = [System.Security.Cryptography.SHA256]::Create()
   try { $sourceHash = [BitConverter]::ToString($hasher.ComputeHash([Text.Encoding]::UTF8.GetBytes(($sourceDescription -join "`n")))).Replace('-', '').ToLowerInvariant() }
@@ -56,7 +66,7 @@ try {
     $index = Get-Content -LiteralPath $indexPath -Raw -Encoding UTF8 | ConvertFrom-Json
     if ($index.sourceHash -ne $sourceHash -or $index.version -ne $version) { throw 'No-update inputs changed for an existing version. Increase the version before rebuilding.' }
     foreach ($asset in $index.assets) {
-      if ((Get-FileHash -LiteralPath (Join-Path $output $asset.name)).Hash.ToLowerInvariant() -ne $asset.sha256) { throw 'Existing no-update asset checksum mismatch.' }
+      if ((Get-PackageFileHash -LiteralPath (Join-Path $output $asset.name)).Hash.ToLowerInvariant() -ne $asset.sha256) { throw 'Existing no-update asset checksum mismatch.' }
     }
     node (Join-Path $PSScriptRoot 'verify-no-update.cjs') (Join-Path $output 'win-unpacked\resources\app.asar') $version
     if ($LASTEXITCODE -ne 0) { throw 'Existing no-update archive verification failed.' }
@@ -103,19 +113,19 @@ try {
     $stream = $entry[0].Open(); $hasher = [Security.Cryptography.SHA256]::Create()
     try {
       $zipHash = [BitConverter]::ToString($hasher.ComputeHash($stream)).Replace('-', '')
-      if ($zipHash -ne (Get-FileHash -LiteralPath $archive).Hash) { throw 'No-update ZIP archive differs from the verified installer payload.' }
+      if ($zipHash -ne (Get-PackageFileHash -LiteralPath $archive).Hash) { throw 'No-update ZIP archive differs from the verified installer payload.' }
     } finally { $stream.Dispose(); $hasher.Dispose() }
   } finally { $zip.Dispose() }
 
   $checksums = foreach ($name in @($installerName, $zipName)) {
-    (Get-FileHash -LiteralPath (Join-Path $output $name)).Hash.ToLowerInvariant() + '  ' + $name
+    (Get-PackageFileHash -LiteralPath (Join-Path $output $name)).Hash.ToLowerInvariant() + '  ' + $name
   }
   [IO.File]::WriteAllText((Join-Path $output 'SHA256SUMS.txt'), (($checksums -join "`n") + "`n"), (New-Object Text.UTF8Encoding $false))
   $instructions = "Codex Drive $version - Windows x64`r`n`r`n无更新地址版：不含局域网更新配置，默认禁用自动更新。`r`n安装版：运行 $installerName。`r`n便携版：解压 $zipName，运行 Codex Speed Pet.exe，请保留其他运行时文件。`r`n升级时请手动下载 GitHub Releases 中的新版本。`r`nSHA256SUMS.txt 提供安装包和便携 ZIP 的 SHA-256 校验值。`r`n"
   [IO.File]::WriteAllText((Join-Path $output 'README-no-update.txt'), $instructions, (New-Object Text.UTF8Encoding $false))
   $assets = foreach ($name in @($installerName, $zipName, 'SHA256SUMS.txt', 'README-no-update.txt')) {
     $file = Get-Item -LiteralPath (Join-Path $output $name)
-    @{ name = $name; size = $file.Length; sha256 = (Get-FileHash -LiteralPath $file.FullName).Hash.ToLowerInvariant() }
+    @{ name = $name; size = $file.Length; sha256 = (Get-PackageFileHash -LiteralPath $file.FullName).Hash.ToLowerInvariant() }
   }
   $index = @{ version = $version; sourceHash = $sourceHash; assets = @($assets) }
   [IO.File]::WriteAllText($indexPath, ($index | ConvertTo-Json -Depth 10), (New-Object Text.UTF8Encoding $false))
@@ -124,6 +134,6 @@ try {
   Write-Output "Built and verified no-update artifacts: $output"
 } finally {
   Pop-Location
-  $afterHash = if (Test-Path -LiteralPath $privateConfig) { (Get-FileHash -LiteralPath $privateConfig).Hash } else { $null }
+  $afterHash = if (Test-Path -LiteralPath $privateConfig) { (Get-PackageFileHash -LiteralPath $privateConfig).Hash } else { $null }
   if ($afterHash -ne $configHash) { throw 'The local update configuration changed during the isolated build.' }
 }
