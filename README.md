@@ -69,8 +69,8 @@ npm run dist:portable
 npm run publish:share -- -Notes "更新说明"
 ```
 
-- 前置条件：关闭所有正在运行的 Codex Speed Pet；共享目录可访问且有写权限。发布用便携包在 `release/.publish-portable-版本号-随机ID` 独立目录构建，不清空本机便携版目录，避免运行库文件占用导致目录被部分删除。
-- 脚本要求新版本号高于共享目录当前版本。流程：检查运行实例与版本 → 构建 NSIS 安装包和便携版 → 压缩 zip → 上传并校验两个安装文件 → 更新 `version.json` → 删除共享目录内该应用的旧版本 exe/zip。
+- 前置条件：关闭所有正在运行的 Codex Speed Pet；共享目录可访问且有写权限；该版本代码已提交并推送到 GitHub，并配置具有仓库 Contents 写权限的 GitHub 凭据。发布用便携包在 `release/.publish-portable-版本号-随机ID` 独立目录构建，不清空本机便携版目录，避免运行库文件占用导致目录被部分删除。
+- 脚本要求新版本号高于共享目录当前版本。流程：检查版本、运行实例和 GitHub 权限/源提交 → 构建局域网 NSIS 安装包和便携版 → 在隔离目录构建并校验无更新地址版 → 上传 GitHub 草稿并校验附件后公开 Release → 上传并校验局域网包 → 更新 `version.json` → 删除共享目录内该应用的旧版本 exe/zip。任一渠道失败都不算发布全部成功；GitHub 阶段失败不会更新局域网版本清单。
 - 上传或构建失败时可排障后重跑；若 `version.json` 已更新而清理旧文件失败，可单独运行 `scripts/prune-share-releases.ps1` 补做清理。
 
 ### 共享目录规则
@@ -78,6 +78,24 @@ npm run publish:share -- -Notes "更新说明"
 - 权限：客户端账号**只读**，发布账号**读写**。能写共享目录的人就能向所有客户端推送可执行文件，写权限务必只放给发布账号。
 - 目录内容只由发布脚本维护，不要手工增删文件；手工改动可能在下次发布时被覆盖。
 - 发布成功后只保留 `version.json` 引用的当前版本安装包和便携版压缩包。清理脚本只匹配本应用的旧版本文件，不会删除当前版本或其他文件。
+
+### GitHub 无更新地址版（每次发布必需）
+
+- 每次新版本必须另外发布无更新地址版到 [当前仓库的 GitHub Releases](https://github.com/Francis0927/CodexSpeedVisualizer/releases)，标签为 `v版本号`，指向对应源代码提交。
+- 安装包与便携 ZIP 都在隔离目录构建，排除 `electron/update-share.json` 和更新地址示例文件；打包后检查实际 `app.asar`、版本、默认禁用更新的行为及便携 ZIP 内的同一运行载荷。原有本机配置保留，不移动或删除。
+- GitHub 只上传 `Codex-Speed-Pet-Setup-x.y.z-no-update.exe`、`Codex-Speed-Pet-portable-x.y.z-no-update.zip`、`SHA256SUMS.txt`、`README-no-update.txt`，禁止上传包含局域网更新地址的包。
+- 构建输出保存在 `release/no-update-x.y.z`。相同版本重试时复用已验证产物；上传失败保留草稿，重试补齐缺失附件。相同名称但 SHA-256 不同的已有附件不会覆盖。两份包校验值见随包的 `SHA256SUMS.txt`。
+- 手动上传时使用 `release/GitHub-Release-vx.y.z`，该目录仅包含要上传的四个附件。在 GitHub 的 Releases → Draft a new release 中选择 `vx.y.z` 标签和对应提交，将目录中的四个文件拖入附件框，等待上传完成后点击 Publish release。构建目录中的子目录、调试文件、`.blockmap` 和验证索引不需要上传。
+- 上传通过 GitHub API，优先读取 `GH_TOKEN` / `GITHUB_TOKEN`，否则尝试已配置的 Git 凭据管理器；凭据不会写入仓库、发布包或日志。无认证或源提交尚未推送时，前置检查直接失败。
+
+单独生成无更新地址版，或补做 GitHub 发布：
+
+```powershell
+npm run dist:no-update
+npm run publish:github -- -Notes "更新说明"
+```
+
+`npm run publish:share` 已包含无更新地址版构建与 GitHub 上传步骤；只有共享目录与 GitHub 两个渠道均完成，才报告发布成功。项目规则同时记录在 `AGENTS.md`。
 
 ### 客户端更新行为（发版后的预期）
 

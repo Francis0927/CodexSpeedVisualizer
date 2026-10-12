@@ -8,10 +8,12 @@
     "dev": "vite --host 127.0.0.1",
     "start": "electron .",
     "build": "tsc --noEmit && vite build",
-    "test": "node --test tests/usage.test.cjs tests/topmost.test.cjs",
+    "test": "node --test tests/usage.test.cjs tests/topmost.test.cjs tests/release.test.cjs",
     "dist:portable": "npm run build && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-portable.ps1",
     "dist": "npm run build && electron-builder --win nsis",
     "publish:share": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/publish-share.ps1",
+    "dist:no-update": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-no-update.ps1",
+    "publish:github": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/publish-github.ps1",
     "test:window": "npm run build && electron tests/window.test.cjs",
     "test:topmost": "electron tests/topmost-window.test.cjs"
   },
