@@ -12,13 +12,17 @@ const ROOT = path.resolve(__dirname, "..");
 function getToken() {
   if (process.env.GH_TOKEN || process.env.GITHUB_TOKEN) return process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
   // Capture credentials in memory. Never echo helper output or invoke a shell.
-  const result = spawnSync("git", ["-c", "credential.interactive=false", "credential", "fill"], {
-    cwd: ROOT, encoding: "utf8", input: "protocol=https\nhost=github.com\n\n",
-    env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "Never" }, windowsHide: true, timeout: 15000
-  });
-  const password = result.status === 0 && result.stdout.split(/\r?\n/).find(line => line.startsWith("password="));
-  if (!password) throw new Error("未找到 GitHub 凭据。请配置 Git 凭据管理器，或设置 GH_TOKEN / GITHUB_TOKEN（需要仓库 Contents 写权限）。");
-  return password.slice("password=".length);
+  // With multiple saved accounts GCM needs a username to avoid an interactive
+  // account picker. Try the repository owner before the generic host lookup.
+  for (const account of [REPOSITORY.split("/")[0], null]) {
+    const result = spawnSync("git", ["-c", "credential.interactive=false", "credential", "fill"], {
+      cwd: ROOT, encoding: "utf8", input: `protocol=https\nhost=github.com\n${account ? `username=${account}\n` : ""}\n`,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "Never" }, windowsHide: true, timeout: 15000
+    });
+    const password = result.status === 0 && result.stdout.split(/\r?\n/).find(line => line.startsWith("password="));
+    if (password) return password.slice("password=".length);
+  }
+  throw new Error("未找到 GitHub 凭据。请配置 Git 凭据管理器，或设置 GH_TOKEN / GITHUB_TOKEN（需要仓库 Contents 写权限）。");
 }
 
 function request(token, method, url, { json, file } = {}) {
