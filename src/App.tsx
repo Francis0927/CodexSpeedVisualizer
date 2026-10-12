@@ -178,7 +178,7 @@ export default function App() {
     : updateStatus.state === "latest" ? `已是最新（v${appInfo.version}）`
     : updateStatus.state === "available" ? `发现新版本 v${updateStatus.version}${updateStatus.notes ? `：${updateStatus.notes}` : ""}`
     : updateStatus.state === "downloading" ? "正在下载更新文件…"
-    : updateStatus.state === "installing" ? "正在安装，应用将自动重启…"
+    : updateStatus.state === "installing" ? "正在启动更新，应用即将退出…"
     : updateStatus.state === "error" ? updateStatus.message || "检查更新失败"
     : updateStatus.state === "unsupported" ? "当前环境不支持更新"
     : `当前版本 v${appInfo.version || "-"}`;
@@ -262,7 +262,7 @@ export default function App() {
         <Toggle label="自动折叠窗口" checked={settings.autoHideChrome} onChange={(autoHideChrome) => update({ autoHideChrome })} />
         <div className="settings-section">系统</div>
         {appInfo.updateEnabled && <div className="update-row">
-          <div className="update-info"><span>版本更新</span><small className={updateStatus.state === "error" ? "update-error" : updateStatus.state === "available" ? "update-highlight" : ""}>{updateLabel}</small></div>
+          <div className="update-info"><span>GitHub 更新</span><small className={updateStatus.state === "error" ? "update-error" : updateStatus.state === "available" ? "update-highlight" : ""}>{updateLabel}</small></div>
           {updateStatus.state === "available"
             ? <button type="button" className="mini-button update-now" onClick={installUpdate} disabled={updateBusy}>立即更新</button>
             : <button type="button" className="mini-button" onClick={checkUpdate} disabled={updateBusy}>{updateStatus.state === "checking" ? "检查中" : "检查更新"}</button>}

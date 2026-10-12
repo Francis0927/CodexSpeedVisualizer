@@ -51,9 +51,9 @@ export type AppSettings = {
 
 export type UpdateStatus = {
   state: "idle" | "checking" | "latest" | "available" | "downloading" | "installing" | "error" | "unsupported";
-  /** Newer version found on the share (state === "available"). */
+  /** Newer version found on GitHub Releases (state === "available"). */
   version: string | null;
-  /** Release notes from the share manifest. */
+  /** Release notes from GitHub. */
   notes: string | null;
   /** Human-readable error detail (state === "error"). */
   message: string | null;

@@ -13,9 +13,9 @@ const future = `${current[0]}.${current[1]}.${current[2] + 1}`;
 
 async function fixture() {
   const directory = await fs.mkdtemp(path.join(root, "release/.prune-test-"));
-  const output = path.join(directory, `no-update-${version}`);
+  const output = path.join(directory, `github-${version}`);
   await fs.mkdir(output);
-  const names = [`Codex-Speed-Pet-Setup-${version}-no-update.exe`, `Codex-Speed-Pet-portable-${version}-no-update.zip`, "SHA256SUMS.txt", "README-no-update.txt"];
+  const names = [`Codex-Speed-Pet-Setup-${version}.exe`, `Codex-Speed-Pet-portable-${version}.zip`, "SHA256SUMS.txt", "README.txt"];
   const assets = [];
   for (const name of names) {
     const bytes = Buffer.from(`latest fixture ${name}`);
@@ -36,12 +36,15 @@ test("cleanup preview is read-only; cleanup removes only old releases and comple
     const oldFile = `Codex Speed Pet Setup ${old}.exe`;
     const oldZip = `Codex-Speed-Pet-portable-${old}.zip`;
     const oldFolder = `GitHub-Release-v${old}`;
-    const scratch = `.no-update-build-${version}-${"a".repeat(32)}`;
+    const scratch = `.github-build-${version}-${"a".repeat(32)}`;
     const portableScratch = `.publish-portable-${version}-${"b".repeat(32)}`;
     const keep = [`Codex Speed Pet Setup ${version}.exe`, `Codex Speed Pet Setup ${future}.exe`, "notes.txt"];
     for (const name of [oldFile, oldZip, ...keep]) await fs.writeFile(path.join(sample.directory, name), "fixture");
     for (const name of [oldFolder, scratch, portableScratch, `no-update-${future}`, "Codex-Speed-Pet-portable"]) await fs.mkdir(path.join(sample.directory, name));
     const noUpdatePortable = path.join(sample.output, "Codex-Speed-Pet-portable");
+    const oldBuild = path.join(sample.directory, "win-unpacked");
+    await fs.mkdir(path.join(oldBuild, "resources/app"), { recursive: true });
+    await fs.writeFile(path.join(oldBuild, "resources/app/package.json"), JSON.stringify({ version: old }));
     await fs.mkdir(noUpdatePortable);
     await fs.mkdir(path.join(sample.output, "win-unpacked"));
     const preview = prune(sample.directory, "-WhatIf");
@@ -49,12 +52,14 @@ test("cleanup preview is read-only; cleanup removes only old releases and comple
     assert.ok(await exists(path.join(sample.directory, oldFile)));
     assert.ok(await exists(path.join(sample.directory, scratch)));
     assert.ok(await exists(noUpdatePortable));
+    assert.ok(await exists(oldBuild));
     const result = prune(sample.directory);
     assert.equal(result.status, 0, result.stdout + result.stderr);
     for (const name of [oldFile, oldZip, oldFolder, scratch, portableScratch]) assert.equal(await exists(path.join(sample.directory, name)), false, name);
     assert.equal(await exists(noUpdatePortable), false);
+    assert.equal(await exists(oldBuild), false);
     assert.equal(await exists(path.join(sample.output, "win-unpacked")), true);
-    for (const name of [...keep, `no-update-${version}`, `no-update-${future}`, "Codex-Speed-Pet-portable"]) assert.equal(await exists(path.join(sample.directory, name)), true, name);
+    for (const name of [...keep, `github-${version}`, `no-update-${future}`, "Codex-Speed-Pet-portable"]) assert.equal(await exists(path.join(sample.directory, name)), true, name);
   } finally { await sample.cleanup(); }
 });
 

@@ -1,15 +1,15 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const { GithubPublisher } = require("../scripts/publish-github.cjs");
-const { verifyNoUpdate } = require("../scripts/verify-no-update.cjs");
+const { verifyRelease } = require("../scripts/verify-release.cjs");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const os = require("node:os");
 const asar = require("@electron/asar");
 const version = "1.2.3", commit = "a".repeat(40);
 const assets = [
-  { name: "Codex-Speed-Pet-Setup-1.2.3-no-update.exe", size: 10, sha256: "a".repeat(64), file: "installer" },
-  { name: "Codex-Speed-Pet-portable-1.2.3-no-update.zip", size: 20, sha256: "b".repeat(64), file: "portable" }
+  { name: "Codex-Speed-Pet-Setup-1.2.3.exe", size: 10, sha256: "a".repeat(64), file: "installer" },
+  { name: "Codex-Speed-Pet-portable-1.2.3.zip", size: 20, sha256: "b".repeat(64), file: "portable" }
 ];
 function fixture({ release = null, badHash = false, failFile = null } = {}) {
   const calls = [];
@@ -47,6 +47,7 @@ test("GitHub release stays a draft until every upload and final digest are verif
   const mutation = sample.calls.filter(call => ["POST", "PATCH"].includes(call.method));
   assert.equal(mutation[0].json.draft, true);
   assert.equal(mutation.at(-1).method, "PATCH");
+  assert.equal(mutation.at(-1).json.make_latest, "true");
   assert.equal(mutation.filter(call => call.file).length, 2);
 });
 
@@ -105,9 +106,26 @@ test("preflight requires release permission, the pushed version and a matching e
       assert.equal(method, "GET");
       if (url.endsWith("/CodexSpeedVisualizer")) return { permissions: { push: bad !== "permission" } };
       if (url.includes("/contents/")) return { content: Buffer.from(JSON.stringify({ version: bad === "version" ? "0.0.0" : version })).toString("base64") };
+      if (url.endsWith("/releases/latest")) return { tag_name: "v1.2.2", draft: false, prerelease: false };
       return { object: { type: "commit", sha: bad === "tag" ? "b".repeat(40) : commit } };
     });
     await assert.rejects(publisher.preflight(version, commit));
+  }
+});
+
+test("preflight allows first releases and matching retries, and rejects a version downgrade", async () => {
+  for (const latest of [null, "1.2.3", "1.2.4"]) {
+    const publisher = new GithubPublisher(async (_method, url) => {
+      if (url.endsWith("/CodexSpeedVisualizer")) return { permissions: { push: true } };
+      if (url.includes("/contents/")) return { content: Buffer.from(JSON.stringify({ version })).toString("base64") };
+      if (url.endsWith("/releases/latest")) {
+        if (!latest) { const error = Error("not found"); error.status = 404; throw error; }
+        return { tag_name: `v${latest}`, draft: false, prerelease: false };
+      }
+      return { object: { type: "commit", sha: commit } };
+    });
+    if (latest === "1.2.4") await assert.rejects(publisher.preflight(version, commit), /回退/);
+    else await publisher.preflight(version, commit);
   }
 });
 
@@ -116,17 +134,17 @@ async function archiveFixture() {
   const source = path.join(root, "source");
   await fs.mkdir(path.join(source, "electron"), { recursive: true });
   await fs.writeFile(path.join(source, "package.json"), JSON.stringify({ version }));
-  await fs.copyFile(path.resolve(__dirname, "../electron/update.cjs"), path.join(source, "electron/update.cjs"));
+  for (const name of ["update.cjs", "github-update.cjs", "portable-update.ps1"]) await fs.copyFile(path.resolve(__dirname, "../electron", name), path.join(source, "electron", name));
   await fs.mkdir(path.join(source, "dist/assets"), { recursive: true });
   await fs.writeFile(path.join(source, "dist/assets/example.js"), "const example = true;");
   return { root, source, archive: path.join(root, "app.asar"), cleanup: () => fs.rm(root, { recursive: true, force: true }) };
 }
 
-test("public archive verification handles Windows paths and proves default updates are disabled", async () => {
+test("public archive verification handles Windows paths and proves GitHub updates are enabled", async () => {
   const sample = await archiveFixture();
   try {
     await asar.createPackage(sample.source, sample.archive);
-    assert.equal(await verifyNoUpdate(sample.archive, version, sample.root), true);
+    assert.equal(await verifyRelease(sample.archive, version, sample.root), true);
   } finally { await sample.cleanup(); }
 });
 
@@ -141,7 +159,7 @@ test("public archive verification rejects update configuration and embedded loca
         await fs.writeFile(path.join(sample.source, "address.json"), JSON.stringify({ value: "test-private-update-address" }));
       }
       await asar.createPackage(sample.source, sample.archive);
-      await assert.rejects(verifyNoUpdate(sample.archive, version, sample.root));
+      await assert.rejects(verifyRelease(sample.archive, version, sample.root));
     } finally { await sample.cleanup(); }
   }
 });

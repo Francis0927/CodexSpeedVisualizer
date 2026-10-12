@@ -4,7 +4,8 @@ const path = require("node:path");
 const https = require("node:https");
 const { createHash } = require("node:crypto");
 const { spawnSync } = require("node:child_process");
-const { verifyNoUpdate } = require("./verify-no-update.cjs");
+const { verifyRelease } = require("./verify-release.cjs");
+const { compareVersions, releaseVersion } = require("../electron/github-update.cjs");
 
 const REPOSITORY = "Francis0927/CodexSpeedVisualizer";
 const ROOT = path.resolve(__dirname, "..");
@@ -77,6 +78,10 @@ class GithubPublisher {
     const file = await this.call("GET", `${this.api}/contents/package.json?ref=${encodeURIComponent(commit)}`);
     const remotePackage = JSON.parse(Buffer.from(file.content, "base64").toString("utf8"));
     if (remotePackage.version !== version) throw new Error("该版本的代码提交尚未在 GitHub。请先提交并推送版本代码，再发布。");
+    try {
+      const latest = await this.call("GET", `${this.api}/releases/latest`);
+      if (compareVersions(version, releaseVersion(latest)) < 0) throw new Error("发布版本低于 GitHub 当前正式版本，不会回退更新渠道。");
+    } catch (error) { if (error.status !== 404) throw error; }
     let ref;
     try { ref = await this.call("GET", `${this.api}/git/ref/tags/v${version}`); }
     catch (error) { if (error.status === 404) return; throw error; }
@@ -104,10 +109,11 @@ class GithubPublisher {
     const tag = `v${version}`;
     let release = await this.findRelease(tag);
     if (!release) release = await this.call("POST", `${this.api}/releases`, { json: {
-      tag_name: tag, target_commitish: commit, name: `Codex Drive ${version}`, draft: true,
-      body: `${notes}${notes ? "\n\n" : ""}无更新地址版：默认禁用自动更新。安装包与便携 ZIP 均不包含局域网更新配置；请手动下载新版升级。SHA256SUMS.txt 提供校验值。`
+      tag_name: tag, target_commitish: commit, name: `Codex Drive ${version}`, draft: true, prerelease: false,
+      body: `${notes}${notes ? "\n\n" : ""}安装版与便携版均支持从 GitHub 检查、下载并更新。旧内网版及旧无更新地址版需手动升级一次。SHA256SUMS.txt 提供校验值。`
     } });
     if (release.draft && release.target_commitish !== commit) throw new Error("现有草稿指向其他源提交，不会自动改写或公开它。");
+    if (release.prerelease) throw new Error("目标 Release 是预发布版本，不会作为正式更新发布。");
     const expected = new Set(assets.map(asset => asset.name));
     if (release.assets.some(asset => !expected.has(asset.name))) throw new Error("目标 Release 含有其他附件，请核对后再发布；不会自动删除或覆盖它们。");
     const existing = new Map(release.assets.map(asset => [asset.name, asset]));
@@ -129,27 +135,27 @@ class GithubPublisher {
     for (const asset of assets) {
       if (!checked.assets.some(remote => remote.name === asset.name && matches(remote, asset))) throw new Error("GitHub Release 附件最终校验失败；不会公开草稿。");
     }
-    if (checked.draft) release = await this.call("PATCH", `${this.api}/releases/${release.id}`, { json: { draft: false } });
+    if (checked.draft) release = await this.call("PATCH", `${this.api}/releases/${release.id}`, { json: { draft: false, make_latest: "true" } });
     else release = checked;
     return release.html_url;
   }
 }
 
 async function localAssets(version) {
-  const directory = path.join(ROOT, `release/no-update-${version}`);
+  const directory = path.join(ROOT, `release/github-${version}`);
   const index = JSON.parse(await fsp.readFile(path.join(directory, "verified-assets.json"), "utf8"));
-  const names = [`Codex-Speed-Pet-Setup-${version}-no-update.exe`, `Codex-Speed-Pet-portable-${version}-no-update.zip`, "SHA256SUMS.txt", "README-no-update.txt"];
-  if (index.version !== version || index.assets.length !== names.length || new Set(index.assets.map(asset => asset.name)).size !== names.length) throw new Error("No-update asset index mismatch");
+  const names = [`Codex-Speed-Pet-Setup-${version}.exe`, `Codex-Speed-Pet-portable-${version}.zip`, "SHA256SUMS.txt", "README.txt"];
+  if (index.version !== version || index.assets.length !== names.length || new Set(index.assets.map(asset => asset.name)).size !== names.length) throw new Error("Release asset index mismatch");
   const assets = [];
   for (const name of names) {
     const expected = index.assets.find(asset => asset.name === name);
-    if (!expected) throw new Error("Only verified no-update release assets may be uploaded");
+    if (!expected) throw new Error("Only verified GitHub release assets may be uploaded");
     const file = path.join(directory, name);
     const stat = await fsp.stat(file);
     if (stat.size !== expected.size || await hashFile(file) !== expected.sha256) throw new Error(`Local asset checksum mismatch: ${name}`);
     assets.push({ ...expected, file });
   }
-  await verifyNoUpdate(path.join(directory, "win-unpacked/resources/app.asar"), version);
+  await verifyRelease(path.join(directory, "win-unpacked/resources/app.asar"), version);
   return assets;
 }
 
@@ -159,6 +165,8 @@ async function main(args) {
   const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: ROOT, encoding: "utf8", windowsHide: true });
   const commit = head.stdout?.trim();
   if (head.status !== 0 || !/^[a-f0-9]{40}$/.test(commit)) throw new Error("Cannot identify the source commit");
+  const dirty = spawnSync("git", ["status", "--porcelain"], { cwd: ROOT, encoding: "utf8", windowsHide: true });
+  if (dirty.status !== 0 || dirty.stdout.trim()) throw new Error("发布前必须提交所有修改；构建代码必须与 GitHub 源提交一致。");
   const token = getToken();
   const publisher = new GithubPublisher((...parameters) => request(token, ...parameters));
   await publisher.preflight(version, commit);
@@ -169,7 +177,7 @@ async function main(args) {
   const notesPosition = args.indexOf("--notes");
   const notes = notesPosition < 0 ? "" : args[notesPosition + 1] || "";
   const url = await publisher.publish(version, commit, await localAssets(version), notes);
-  console.log(`GitHub no-update release published and verified: ${url}`);
+  console.log(`GitHub release published and verified: ${url}`);
 }
 
 module.exports = { GithubPublisher, matches };

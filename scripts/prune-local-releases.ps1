@@ -1,7 +1,7 @@
 ﻿[CmdletBinding(SupportsShouldProcess = $true)]
 param(
   [string]$CurrentVersion = '',
-  [ValidateSet('NoUpdate', 'Portable', 'Installer')][string]$Mode = 'NoUpdate',
+  [ValidateSet('Release', 'Portable', 'Installer')][string]$Mode = 'Release',
   [string]$PortableDirectory = '',
   [string]$ReleaseDirectory = ''
 )
@@ -63,16 +63,16 @@ if (-not (Test-Path -LiteralPath $releasePath -PathType Container)) { throw 'Rel
 
 # Require a complete latest build before selecting any deletion candidates.
 # Callers invoke this only after their variant's build/verification succeeds.
-if ($Mode -eq 'NoUpdate') {
-  $output = Join-Path $releasePath "no-update-$CurrentVersion"
+if ($Mode -eq 'Release') {
+  $output = Join-Path $releasePath "github-$CurrentVersion"
   [void](Assert-SafePath $output)
   $index = Get-Content -LiteralPath (Join-Path $output 'verified-assets.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-  $expected = @("Codex-Speed-Pet-Setup-$CurrentVersion-no-update.exe", "Codex-Speed-Pet-portable-$CurrentVersion-no-update.zip", 'SHA256SUMS.txt', 'README-no-update.txt')
-  if ($index.version -ne $CurrentVersion -or @($index.assets).Count -ne 4 -or @($index.assets | Select-Object -ExpandProperty name -Unique).Count -ne 4) { throw 'Latest no-update build is not complete.' }
+  $expected = @("Codex-Speed-Pet-Setup-$CurrentVersion.exe", "Codex-Speed-Pet-portable-$CurrentVersion.zip", 'SHA256SUMS.txt', 'README.txt')
+  if ($index.version -ne $CurrentVersion -or @($index.assets).Count -ne 4 -or @($index.assets | Select-Object -ExpandProperty name -Unique).Count -ne 4) { throw 'Latest GitHub release build is not complete.' }
   foreach ($asset in $index.assets) {
     if ($asset.name -notin $expected) { throw 'Unexpected latest asset name.' }
     $file = Assert-SafePath (Join-Path $output $asset.name)
-    if ((Get-Item -LiteralPath $file).Length -ne $asset.size -or (Read-Sha256 $file) -ne $asset.sha256) { throw 'Latest no-update package verification failed; old releases were retained.' }
+    if ((Get-Item -LiteralPath $file).Length -ne $asset.size -or (Read-Sha256 $file) -ne $asset.sha256) { throw 'Latest GitHub release package verification failed; old releases were retained.' }
   }
 } elseif ($Mode -eq 'Portable') {
   $portable = if ($PortableDirectory) { [IO.Path]::GetFullPath($PortableDirectory) } else { Join-Path $releasePath 'Codex-Speed-Pet-portable' }
@@ -93,19 +93,19 @@ foreach ($item in Get-ChildItem -LiteralPath $releasePath -Force) {
       $item.Name -match '^Codex\-Speed\-Pet\-portable\-(\d+\.\d+\.\d+)(?:\-no\-update)?\.zip$') {
       $version = [version]$Matches[1]
     }
-  } elseif ($item.Name -match '^(?:no-update-|GitHub-Release-v)(\d+\.\d+\.\d+)$') {
+  } elseif ($item.Name -match '^(?:github-|no-update-|GitHub-Release-v)(\d+\.\d+\.\d+)$') {
     $version = [version]$Matches[1]
-  } elseif ($item.Name -match '^\.(?:no-update-build|verify-retry-no-update|publish-portable)-(\d+\.\d+\.\d+)(?:-[a-f0-9]{32})?$') {
+  } elseif ($item.Name -match '^\.(?:github-build|no-update-build|verify-retry-no-update|publish-portable)-(\d+\.\d+\.\d+)(?:-[a-f0-9]{32})?$') {
     $version = [version]$Matches[1]
     $temporary = $true
-  } elseif ($item.Name -eq 'config-check') {
+  } elseif ($item.Name -in @('config-check', 'win-unpacked')) {
     [void](Assert-SafePath $item.FullName)
     $value = Read-BuildVersion $item.FullName
     if ($value) { $version = [version]$value }
   }
-  # Keep all current/future deliverables. Completed no-update source/failed
+  # Keep all current/future deliverables. Completed GitHub release source/failed
   # build scratch directories are also disposable after successful validation.
-  if ($null -ne $version -and ($version -lt $current -or ($temporary -and $version -eq $current -and $Mode -eq 'NoUpdate'))) {
+  if ($null -ne $version -and ($version -lt $current -or ($temporary -and $version -eq $current -and $Mode -eq 'Release'))) {
     $absolute = Assert-SafePath $item.FullName
     if ([IO.Path]::GetDirectoryName($absolute) -ne $releasePath) { throw 'Cleanup candidate is not a direct child of the release directory.' }
     if ($item.PSIsContainer) { Assert-NoLinksInTree $absolute }
@@ -115,7 +115,7 @@ foreach ($item in Get-ChildItem -LiteralPath $releasePath -Force) {
 
 # The verified ZIP and win-unpacked archive are sufficient for reuse. The
 # extra portable tree was only used while creating that ZIP.
-if ($Mode -eq 'NoUpdate') {
+if ($Mode -eq 'Release') {
   $portableScratch = Assert-SafePath (Join-Path $output 'Codex-Speed-Pet-portable')
   if (Test-Path -LiteralPath $portableScratch -PathType Container) {
     Assert-NoLinksInTree $portableScratch

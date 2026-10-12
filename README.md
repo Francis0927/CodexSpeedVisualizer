@@ -34,82 +34,60 @@ npm run dist:portable
 
 从 `release/Codex-Speed-Pet-portable/Codex Speed Pet.exe` 启动。请保留该文件夹的其他运行时文件。
 
-## 局域网更新
+## GitHub 更新与发布
 
-应用内置基于局域网共享目录的自动更新。更新地址从本机配置文件 `electron/update-share.json` 读取，发布脚本也使用同一配置；该文件已加入忽略规则，后续提交不会包含它。
+安装版和便携版统一从 [GitHub Releases](https://github.com/Francis0927/CodexSpeedVisualizer/releases) 更新。正式打包的程序默认启用更新，开发环境不下载或安装更新。
 
-共享目录里由发布脚本维护三个文件：
+- 启动后 5 秒、之后每 4 小时检查一次，也可在设置或托盘菜单手动检查。只检查正式版本，发现新版本后由用户点击「立即更新」。
+- 安装版下载并校验安装包，退出程序后启动安装程序覆盖安装；自定义安装目录也通过目录内的 NSIS 卸载程序识别为安装版。
+- 便携版下载并校验 ZIP，退出后在后台备份、替换程序文件并重新启动；替换失败尝试恢复备份，失败日志及保留的备份位置可用于排查。
+- 更新从固定仓库读取，不需要用户配置共享目录或 GitHub 凭据。GitHub 无法连接或请求受限时显示错误，用户可稍后重试，也可从 Releases 手动下载。
+- 下载后核对文件大小与 SHA-256；校验失败不安装。更新日志在用户数据目录的 `update.log` 和 `updater-script-last.log`。
+- 旧内网版和旧无更新地址版需要手动升级一次：安装版退出旧程序后在原目录覆盖安装，通常不需要卸载；便携版退出后将新版解压到新目录运行。之后统一使用 GitHub 更新。用户设置与统计重置记录保存在用户数据目录。
 
-- `version.json`：版本号、更新说明、安装包与便携版文件名
-- `Codex Speed Pet Setup x.x.x.exe`：NSIS 安装包（安装版客户端使用）
-- `Codex-Speed-Pet-portable-x.x.x.zip`：便携版压缩包（便携版客户端使用）
+### 版本与构建
 
-客户端启动后和每 4 小时自动检查一次，也可在「设置 → 系统 → 版本更新」手动检查；发现新版本后点「立即更新」。安装版会下载安装包并启动安装程序覆盖安装；便携版会下载压缩包、在后台替换自身文件并自动重启。更新过程日志保存在用户数据目录的 `update.log`。
+版本以 `package.json` 的 `version` 为准，每次发布递增，不以同一版本发布不同内容。可用 `npm version x.y.z --no-git-tag-version` 修改版本。
 
-发布流程见下文「发包规则」。
+生成供 GitHub 发布的全部文件：
 
-## 发包规则
+```powershell
+npm run dist:release
+```
 
-### 版本号
+构建在隔离目录完成，禁止把废弃的 `update-share.json`、更新地址示例或本机内网地址带入包中。遗留本机配置保持忽略，不再参与更新。校验实际 `app.asar` 的版本、GitHub 更新默认启用的行为及便携 ZIP 与安装载荷的一致性。
 
-- 版本号以 `package.json` 的 `version` 字段为准，它是客户端判断「有没有新版本」的唯一依据，**每次发版必须单调递增**：修复问题 +0.0.1，新增功能 +0.1.0。
-- 修改方式：`npm version x.y.z --no-git-tag-version`（或手工改 `package.json`）。
-- 禁止用相同版本号重复发布不同内容的包——客户端版本相等就永远不会更新。
+输出目录为 `release/github-x.y.z`；供上传的目录为 `release/GitHub-Release-vx.y.z`，仅包含以下四个附件：
 
-### 本地仅保留最新版本
-
-- 安装版、便携版、无更新地址版打包并校验成功后，会自动清理 `release/` 中较低版本的安装包、ZIP、`.blockmap`、无更新地址目录、GitHub 上传目录和历史构建目录。无更新地址包验证成功后，还会清理同版本已经完成的隔离源码、临时便携目录和失败构建缓存。
-- 保留最新版本的各类包、上传附件和复用所需的验证索引；本机便携程序运行目录、未知文件和较高版本不会被删除。打包失败不会触发清理。被进程占用的旧文件会保留并报错，释放占用后重试。
-- 手动清理：`npm run prune:local`。先预览：`npm run prune:local -- -WhatIf`。脚本会先确认当前版本的无更新地址包完整且校验正确，再执行清理。
-
-### 发布目录配置
-
-- 复制示例配置：`Copy-Item electron/update-share.example.json electron/update-share.json`。
-- 在 `electron/update-share.json` 的 `share` 字段填入共享目录的 UNC 路径。JSON 中每个反斜杠要写成两个，例如 `\\\\server\\share\\CodexSpeedVisualizer`。此文件只保存在本机，已加入 `.gitignore`。 若该地址此前已提交，忽略规则不会清除 Git 历史中的内容。
-- 客户端与发布脚本都读取该配置。改路径后必须重新打包，新包才会指向新目录；已有客户端仍指向原目录。未配置时应用仍可运行，但更新功能不可用，发布脚本会提示缺少配置。
-- **编码规则**：带中文的 `.ps1` 文件保存为 UTF-8 带 BOM；JSON 配置保存为 UTF-8，发布脚本会明确按 UTF-8 读取。
+- `Codex-Speed-Pet-Setup-x.y.z.exe`
+- `Codex-Speed-Pet-portable-x.y.z.zip`
+- `SHA256SUMS.txt`
+- `README.txt`
 
 ### 一键发布
 
 ```powershell
-npm run publish:share -- -Notes "更新说明"
-```
-
-- 前置条件：关闭所有正在运行的 Codex Speed Pet；共享目录可访问且有写权限；该版本代码已提交并推送到 GitHub，并配置具有仓库 Contents 写权限的 GitHub 凭据。发布用便携包在 `release/.publish-portable-版本号-随机ID` 独立目录构建，不清空本机便携版目录，避免运行库文件占用导致目录被部分删除。
-- 脚本要求新版本号高于共享目录当前版本。流程：检查版本、运行实例和 GitHub 权限/源提交 → 构建局域网 NSIS 安装包和便携版 → 在隔离目录构建并校验无更新地址版 → 上传 GitHub 草稿并校验附件后公开 Release → 上传并校验局域网包 → 更新 `version.json` → 删除共享目录内该应用的旧版本 exe/zip。任一渠道失败都不算发布全部成功；GitHub 阶段失败不会更新局域网版本清单。
-- 上传或构建失败时可排障后重跑；若 `version.json` 已更新而清理旧文件失败，可单独运行 `scripts/prune-share-releases.ps1` 补做清理。
-
-### 共享目录规则
-
-- 权限：客户端账号**只读**，发布账号**读写**。能写共享目录的人就能向所有客户端推送可执行文件，写权限务必只放给发布账号。
-- 目录内容只由发布脚本维护，不要手工增删文件；手工改动可能在下次发布时被覆盖。
-- 发布成功后只保留 `version.json` 引用的当前版本安装包和便携版压缩包。清理脚本只匹配本应用的旧版本文件，不会删除当前版本或其他文件。
-
-### GitHub 无更新地址版（每次发布必需）
-
-- 每次新版本必须另外发布无更新地址版到 [当前仓库的 GitHub Releases](https://github.com/Francis0927/CodexSpeedVisualizer/releases)，标签为 `v版本号`，指向对应源代码提交。
-- 安装包与便携 ZIP 都在隔离目录构建，排除 `electron/update-share.json` 和更新地址示例文件；打包后检查实际 `app.asar`、版本、默认禁用更新的行为及便携 ZIP 内的同一运行载荷。原有本机配置保留，不移动或删除。
-- GitHub 只上传 `Codex-Speed-Pet-Setup-x.y.z-no-update.exe`、`Codex-Speed-Pet-portable-x.y.z-no-update.zip`、`SHA256SUMS.txt`、`README-no-update.txt`，禁止上传包含局域网更新地址的包。
-- 构建输出保存在 `release/no-update-x.y.z`。相同版本重试时复用已验证产物；上传失败保留草稿，重试补齐缺失附件。相同名称但 SHA-256 不同的已有附件不会覆盖。两份包校验值见随包的 `SHA256SUMS.txt`。
-- 手动上传时使用 `release/GitHub-Release-vx.y.z`，该目录仅包含要上传的四个附件。在 GitHub 的 Releases → Draft a new release 中选择 `vx.y.z` 标签和对应提交，将目录中的四个文件拖入附件框，等待上传完成后点击 Publish release。构建目录中的子目录、调试文件、`.blockmap` 和验证索引不需要上传。
-- 上传通过 GitHub API，优先读取 `GH_TOKEN` / `GITHUB_TOKEN`，否则尝试已配置的 Git 凭据管理器；凭据不会写入仓库、发布包或日志。无认证或源提交尚未推送时，前置检查直接失败。
-
-单独生成无更新地址版，或补做 GitHub 发布：
-
-```powershell
-npm run dist:no-update
 npm run publish:github -- -Notes "更新说明"
 ```
 
-`npm run publish:share` 已包含无更新地址版构建与 GitHub 上传步骤；只有共享目录与 GitHub 两个渠道均完成，才报告发布成功。项目规则同时记录在 `AGENTS.md`。
+发布前将全部代码修改提交并推送到 GitHub；工作区必须干净，标签 `vx.y.z` 对应本次代码提交。脚本只从 `GH_TOKEN`、`GITHUB_TOKEN` 或 Git 凭据管理器读取发布凭据，不写入仓库、发布包或日志。
 
-### 客户端更新行为（发版后的预期）
+流程：检查代码提交、版本标签和发布权限 → 隔离构建并校验 → 创建或复用 GitHub 草稿 → 上传四个附件 → 核对服务器上的 SHA-256 与大小 → 正式发布。上传失败保留草稿和本地产物，重试补齐附件；同名但校验不同的附件不覆盖，既有正式 Release 不改写。
 
-- 客户端启动后 5 秒、之后每 4 小时自动检查一次；也可在「设置 → 系统 → 版本更新 → 检查更新」手动触发。
-- 安装版：下载安装包 → 退出并启动安装程序覆盖安装。
-- 便携版：下载压缩包 → 后台整体替换自身文件 → 自动重启。
-- 更新日志写在客户端用户数据目录的 `update.log`，排查更新问题时先看它。
-- 内置旧共享目录路径的客户端需要先手工覆盖一次新版本，之后才能自动更新。
+已存在的同版本构建仅在输入和校验完全一致时复用。内容变化必须增加版本号。历史 Release 附件保持原样，新版使用上述名称。
+
+### 本地产物清理
+
+打包校验成功后使用 `scripts/prune-local-releases.ps1` 清理 `release/` 下可识别的旧版本包、历史无更新地址目录、上传目录和构建缓存；当前版本已完成的临时源码及便携目录也清理。
+
+打包失败保留旧包。保留当前和更高版本、未知文件、本机便携程序运行目录；不跟随符号链接或目录联接。文件占用导致清理失败时明确报告，释放占用后可重试。
+
+```powershell
+npm run prune:local -- -WhatIf
+npm run prune:local
+```
+
+项目发布规则同时记录在 `AGENTS.md`。
 
 ## 统计口径
 

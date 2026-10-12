@@ -14,12 +14,21 @@ if (-not $target.StartsWith(($releaseRoot + [System.IO.Path]::DirectorySeparator
 $electron = Join-Path $root 'node_modules\electron\dist'
 if (-not (Test-Path -LiteralPath (Join-Path $electron 'electron.exe'))) { throw 'Electron runtime is missing.' }
 if (-not (Test-Path -LiteralPath (Join-Path $root 'dist\index.html'))) { throw 'Run npm run build first.' }
-if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse -Force }
+if (Test-Path -LiteralPath $target) {
+  if ((Get-Item -LiteralPath $target -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Portable output cannot be a link.' }
+  $busy = @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith(($target + [IO.Path]::DirectorySeparatorChar), [StringComparison]::OrdinalIgnoreCase) })
+  if ($busy.Count) { throw 'Exit the portable application before rebuilding its directory.' }
+  Remove-Item -LiteralPath $target -Recurse -Force
+}
 New-Item -ItemType Directory -Path $target -Force | Out-Null
 Copy-Item -Path (Join-Path $electron '*') -Destination $target -Recurse -Force
 $app = Join-Path $target 'resources\app'
 New-Item -ItemType Directory -Path $app -Force | Out-Null
-Copy-Item -LiteralPath (Join-Path $root 'electron') -Destination $app -Recurse
+$electronApp = Join-Path $app 'electron'
+New-Item -ItemType Directory -Path $electronApp -Force | Out-Null
+Get-ChildItem -LiteralPath (Join-Path $root 'electron') -File | Where-Object { $_.Name -notlike 'update-share*.json' } | ForEach-Object {
+  Copy-Item -LiteralPath $_.FullName -Destination $electronApp
+}
 Copy-Item -LiteralPath (Join-Path $root 'dist') -Destination $app -Recurse
 Copy-Item -LiteralPath (Join-Path $root 'assets') -Destination $app -Recurse
 $version = (Get-Content -LiteralPath (Join-Path $root 'package.json') -Raw | ConvertFrom-Json).version
