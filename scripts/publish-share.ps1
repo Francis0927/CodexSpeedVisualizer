@@ -42,8 +42,11 @@ try {
   npm run dist
   if ($LASTEXITCODE -ne 0) { throw 'npm run dist 失败' }
   Write-Host '== 构建便携版 ==' -ForegroundColor Cyan
-  npm run dist:portable
-  if ($LASTEXITCODE -ne 0) { throw 'npm run dist:portable 失败' }
+  # Use the renderer built above and a fresh output directory. Publishing must
+  # not destroy the local portable checkout when Windows holds a runtime DLL.
+  $portableStage = Join-Path $root ("release\.publish-portable-$version-" + [guid]::NewGuid().ToString('N'))
+  powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'package-portable.ps1') -OutputDirectory $portableStage
+  if ($LASTEXITCODE -ne 0) { throw '便携版构建失败' }
 
   $setupName = "Codex Speed Pet Setup $version.exe"
   $zipName = "Codex-Speed-Pet-portable-$version.zip"
@@ -53,7 +56,7 @@ try {
   Write-Host '== 压缩便携版 ==' -ForegroundColor Cyan
   $zipPath = Join-Path $root "release\$zipName"
   if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath }
-  Compress-Archive -Path (Join-Path $root 'release\Codex-Speed-Pet-portable\*') -DestinationPath $zipPath
+  Compress-Archive -Path (Join-Path $portableStage '*') -DestinationPath $zipPath
 
   Write-Host "== 推送到共享目录 $Share ==" -ForegroundColor Cyan
   Copy-Item -LiteralPath $setupPath -Destination (Join-Path $Share $setupName) -Force

@@ -42,6 +42,11 @@ app.whenReady().then(async()=>{
  win.webContents.setBackgroundThrottling(false);
  if(win.webContents.isLoading())await new Promise(r=>win.webContents.once('did-finish-load',r));
  await sleep(500);await enter(win);await sleep(4300);
+ assert.equal(win.isAlwaysOnTop(),true,'default setting must be applied to the native window');
+ await win.webContents.executeJavaScript(`window.speedPet.updateSettings({alwaysOnTop:false})`);
+ assert.equal(win.isAlwaysOnTop(),false,'disabling topmost must reach the main-process guard');
+ await win.webContents.executeJavaScript(`window.speedPet.updateSettings({alwaysOnTop:true})`);
+ assert.equal(win.isAlwaysOnTop(),true,'re-enabling topmost must reach the main-process guard');
  assert.equal((await state(win)).collapsed,false,'hover must cancel the initial collapse timer');
  for(const size of ['small','medium','large']){
   await win.webContents.executeJavaScript(`window.speedPet.updateSettings({size:'${size}',autoHideChrome:true})`);await sleep(250);await enter(win);

@@ -3,6 +3,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { UsageCollector } = require("./usage.cjs");
 const updater = require("./update.cjs");
+const { createTopmostGuard } = require("./topmost.cjs");
 
 if (process.env.CODEX_SPEED_PET_DEBUG_PORT) app.commandLine.appendSwitch("remote-debugging-port", process.env.CODEX_SPEED_PET_DEBUG_PORT);
 const collector = new UsageCollector();
@@ -14,6 +15,7 @@ let settings = { alwaysOnTop: true, reducedMotion: false, launchAtLogin: false, 
 let panelOpen = false;
 let quitting = false;
 let savePositionTimer = null;
+let topmostGuard = null;
 
 function settingsPath() { return path.join(app.getPath("userData"), "settings.json"); }
 
@@ -69,7 +71,7 @@ function settingsPayload() { return { ...settings, viewSize: effectiveSize() }; 
 function broadcastSettings() {
   if (window && !window.isDestroyed()) {
     window.webContents.send("settings:update", settingsPayload());
-    window.setAlwaysOnTop(settings.alwaysOnTop);
+    topmostGuard?.apply(settings.alwaysOnTop);
   }
   rebuildTrayMenu();
 }
@@ -122,6 +124,8 @@ function createWindow() {
       sandbox: true
     }
   });
+  topmostGuard = createTopmostGuard(window);
+  topmostGuard.apply(settings.alwaysOnTop);
   window.setMenuBarVisibility(false);
   window.once("ready-to-show", () => window.show());
   window.on("move", () => {
@@ -207,6 +211,7 @@ function appInfo() {
 
 app.on("before-quit", () => {
   quitting = true;
+  topmostGuard?.dispose();
   updater.stop();
   collector.stop();
   if (savePositionTimer) { clearTimeout(savePositionTimer); saveSettings(); }

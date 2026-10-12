@@ -1,8 +1,15 @@
+﻿param([string]$OutputDirectory = 'release\Codex-Speed-Pet-portable')
+
 $ErrorActionPreference = 'Stop'
 $root = [System.IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
-$target = [System.IO.Path]::GetFullPath((Join-Path $root 'release\Codex-Speed-Pet-portable'))
-if (-not $target.StartsWith(($root + [System.IO.Path]::DirectorySeparatorChar), [System.StringComparison]::OrdinalIgnoreCase)) {
-  throw 'Portable output path is outside the project.'
+$releaseRoot = [System.IO.Path]::GetFullPath((Join-Path $root 'release'))
+$target = if ([System.IO.Path]::IsPathRooted($OutputDirectory)) {
+  [System.IO.Path]::GetFullPath($OutputDirectory)
+} else {
+  [System.IO.Path]::GetFullPath((Join-Path $root $OutputDirectory))
+}
+if (-not $target.StartsWith(($releaseRoot + [System.IO.Path]::DirectorySeparatorChar), [System.StringComparison]::OrdinalIgnoreCase)) {
+  throw 'Portable output path must be a child of the release directory.'
 }
 $electron = Join-Path $root 'node_modules\electron\dist'
 if (-not (Test-Path -LiteralPath (Join-Path $electron 'electron.exe'))) { throw 'Electron runtime is missing.' }
