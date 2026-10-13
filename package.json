@@ -1,6 +1,6 @@
 {
   "name": "codex-speed-pet",
-  "version": "0.5.8",
+  "version": "0.5.9",
   "private": true,
   "description": "A local Codex token speed car dashboard",
   "main": "electron/main.cjs",

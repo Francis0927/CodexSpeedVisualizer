@@ -12,6 +12,7 @@ const old = current[2] ? `${current[0]}.${current[1]}.${current[2] - 1}` : "0.0.
 const future = `${current[0]}.${current[1]}.${current[2] + 1}`;
 
 async function fixture() {
+  await fs.mkdir(path.join(root, "release"), { recursive: true });
   const directory = await fs.mkdtemp(path.join(root, "release/.prune-test-"));
   const output = path.join(directory, `github-${version}`);
   await fs.mkdir(output);
