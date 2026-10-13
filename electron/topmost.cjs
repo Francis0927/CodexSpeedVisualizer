@@ -5,7 +5,11 @@ function createTopmostGuard(window, { platform = process.platform, timers = glob
   let enabled = false;
   let timer = null;
   let disposed = false;
-  const level = "floating";
+  // Electron 29 moves Windows "floating" windows behind Shell_TrayWnd with
+  // SetWindowPos, which can remove WS_EX_TOPMOST. "pop-up-menu" skips that
+  // taskbar placement and uses the normal Windows topmost band; later topmost
+  // windows (e.g. screenshot overlays) can still cover us.
+  const level = platform === "win32" ? "pop-up-menu" : "floating";
 
   function stopTimer() {
     if (timer !== null) timers.clearInterval(timer);

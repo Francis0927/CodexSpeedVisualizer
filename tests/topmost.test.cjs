@@ -29,7 +29,7 @@ function fixture() {
 test("repairs lost topmost flag without raising over screenshot overlays or focusing", () => {
   const { window, guard, active, tick } = fixture();
   guard.apply(true);
-  assert.deepEqual(window.calls, [[true, "floating"]]);
+  assert.deepEqual(window.calls, [[true, "pop-up-menu"]], "Windows must avoid floating, which Electron 29 moves behind the taskbar and can demote");
   assert.equal(active.size, 0);
   window.visible = true; window.emit("show");
   assert.equal(active.size, 1);

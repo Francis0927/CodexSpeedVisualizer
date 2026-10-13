@@ -18,6 +18,7 @@ using System.Runtime.InteropServices;
 public static class WindowOrder {
   [DllImport("user32.dll")] public static extern IntPtr GetWindow(IntPtr handle, uint command);
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern int GetWindowLong(IntPtr handle, int index);
 }
 '@
 $petHandle = [IntPtr]::new([long]${petHandle})
@@ -28,7 +29,7 @@ for ($i = 0; $i -lt 10000 -and $cursor -ne [IntPtr]::Zero; $i++) {
   if ($cursor -eq $petHandle) { $petAbove = $true; break }
   $cursor = [WindowOrder]::GetWindow($cursor, 3)
 }
-@{ petAbove = $petAbove; foreground = [WindowOrder]::GetForegroundWindow().ToInt64().ToString() } | ConvertTo-Json -Compress
+@{ petAbove = $petAbove; foreground = [WindowOrder]::GetForegroundWindow().ToInt64().ToString(); topmost = ([WindowOrder]::GetWindowLong($petHandle, -20) -band 8) -ne 0 } | ConvertTo-Json -Compress
 `;
   return JSON.parse(execFileSync("powershell.exe", ["-NoProfile", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")], { encoding: "utf8", windowsHide: true, timeout: 10000 }));
 }
@@ -41,6 +42,8 @@ app.whenReady().then(async () => {
   await blocker.loadURL("data:text/html,<body>Other topmost app</body>");
   guard = createTopmostGuard(pet);
   guard.apply(true);
+  assert.equal(pet.isAlwaysOnTop(), true, "enabling topmost must work while the window is still hidden");
+  assert.equal(nativeState(pet, blocker).topmost, true, "Windows WS_EX_TOPMOST must be set, not only an Electron setting");
   blocker.setAlwaysOnTop(true, "screen-saver");
   pet.showInactive(); blocker.show();
   await sleep(150);
@@ -57,8 +60,14 @@ app.whenReady().then(async () => {
   // never activate the dashboard, even when another app becomes foreground.
   assert.notEqual(overlay.foreground, pet.getNativeWindowHandle().readBigUInt64LE().toString(), "maintenance must not steal foreground focus");
   assert.equal(pet.isAlwaysOnTop(), true, "dashboard must retain ordinary topmost behavior");
+  assert.equal(overlay.topmost, true, "native topmost flag must survive show and maintenance");
   blocker.setAlwaysOnTop(false); blocker.moveTop();
   assert.equal(nativeState(pet, blocker).petAbove, true, "a normal window must stay below the dashboard");
+  pet.setBounds({ x: 45, y: 45, width: 220, height: 180 });
+  blocker.focus(); blocker.moveTop();
+  await sleep(1200);
+  assert.equal(nativeState(pet, blocker).petAbove, true, "moving/resizing and switching to a normal app must retain topmost");
+  assert.equal(nativeState(pet, blocker).topmost, true);
   blocker.setAlwaysOnTop(true, "screen-saver"); blocker.moveTop();
   pet.setAlwaysOnTop(false);
   await sleep(1200);
