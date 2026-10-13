@@ -53,6 +53,16 @@ try {
       Where-Object { $_.Name -notin @('update-share.json', 'update-share.example.json') }
   }
   $sourceDescription = @('github-release-v2', ($package | ConvertTo-Json -Depth 20 -Compress))
+  foreach ($relative in @('package-lock.json', 'scripts/package-release.ps1', 'scripts/verify-release.cjs')) {
+    $sourceDescription += $relative + ':' + (Get-PackageFileHash -LiteralPath (Join-Path $root $relative)).Hash
+  }
+  # Local builds from a downloaded source ZIP still work without Git metadata.
+  # Actions uploads additionally require this commit to match GITHUB_SHA.
+  $sourceCommit = $null
+  if (Test-Path -LiteralPath (Join-Path $root '.git')) {
+    $sourceCommit = (git rev-parse HEAD).Trim()
+    if ($LASTEXITCODE -ne 0 -or $sourceCommit -notmatch '^[a-f0-9]{40}$') { throw 'Cannot identify the source commit.' }
+  }
   foreach ($file in $inputs | Sort-Object FullName) {
     $sourceDescription += $file.FullName.Substring($root.Length + 1).Replace('\', '/') + ':' + (Get-PackageFileHash -LiteralPath $file.FullName).Hash
   }
@@ -134,7 +144,7 @@ try {
     $file = Get-Item -LiteralPath (Join-Path $output $name)
     @{ name = $name; size = $file.Length; sha256 = (Get-PackageFileHash -LiteralPath $file.FullName).Hash.ToLowerInvariant() }
   }
-  $index = @{ version = $version; sourceHash = $sourceHash; assets = @($assets) }
+  $index = @{ version = $version; sourceCommit = $sourceCommit; sourceHash = $sourceHash; assets = @($assets) }
   [IO.File]::WriteAllText($indexPath, ($index | ConvertTo-Json -Depth 10), (New-Object Text.UTF8Encoding $false))
   Export-GitHubUploadDirectory $assets
   & (Join-Path $PSScriptRoot 'prune-local-releases.ps1') -CurrentVersion $version -Mode Release

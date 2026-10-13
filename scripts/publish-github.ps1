@@ -3,10 +3,11 @@ $ErrorActionPreference = 'Stop'
 $root = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 Push-Location $root
 try {
-  node (Join-Path $PSScriptRoot 'publish-github.cjs') --preflight
-  if ($LASTEXITCODE -ne 0) { throw 'GitHub Release preflight failed.' }
-  powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'package-release.ps1')
-  if ($LASTEXITCODE -ne 0) { throw 'GitHub release package build failed.' }
-  node (Join-Path $PSScriptRoot 'publish-github.cjs') --notes $Notes
-  if ($LASTEXITCODE -ne 0) { throw 'GitHub Release publish failed.' }
+  # Pass notes as data, including quotes/newlines, never as shell source.
+  $previousNotes = $env:RELEASE_NOTES
+  try {
+    $env:RELEASE_NOTES = $Notes
+    node (Join-Path $PSScriptRoot 'release-actions.cjs')
+    if ($LASTEXITCODE -ne 0) { throw 'GitHub Actions release did not complete. See the workflow URL and error above.' }
+  } finally { $env:RELEASE_NOTES = $previousNotes }
 } finally { Pop-Location }

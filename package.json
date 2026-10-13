@@ -1,6 +1,6 @@
 {
   "name": "codex-speed-pet",
-  "version": "0.5.7",
+  "version": "0.5.8",
   "private": true,
   "description": "A local Codex token speed car dashboard",
   "main": "electron/main.cjs",
@@ -8,7 +8,7 @@
     "dev": "vite --host 127.0.0.1",
     "start": "electron .",
     "build": "tsc --noEmit && vite build",
-    "test": "node --test tests/usage.test.cjs tests/topmost.test.cjs tests/release.test.cjs tests/prune-local.test.cjs tests/update.test.cjs",
+    "test": "node --test tests/usage.test.cjs tests/topmost.test.cjs tests/release.test.cjs tests/release-actions.test.cjs tests/prune-local.test.cjs tests/update.test.cjs",
     "dist:portable": "npm run build && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-portable.ps1",
     "dist": "npm run build && electron-builder --win nsis && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prune-local-releases.ps1 -Mode Installer",
     "prune:local": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prune-local-releases.ps1",

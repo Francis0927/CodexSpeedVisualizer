@@ -4,7 +4,6 @@ const path = require("node:path");
 const https = require("node:https");
 const { createHash } = require("node:crypto");
 const { spawnSync } = require("node:child_process");
-const { verifyRelease } = require("./verify-release.cjs");
 const { compareVersions, releaseVersion } = require("../electron/github-update.cjs");
 
 const REPOSITORY = "Francis0927/CodexSpeedVisualizer";
@@ -23,7 +22,7 @@ function getToken() {
     const password = result.status === 0 && result.stdout.split(/\r?\n/).find(line => line.startsWith("password="));
     if (password) return password.slice("password=".length);
   }
-  throw new Error("未找到 GitHub 凭据。请配置 Git 凭据管理器，或设置 GH_TOKEN / GITHUB_TOKEN（需要仓库 Contents 写权限）。");
+  throw new Error("未找到 GitHub 凭据。请配置 Git 凭据管理器，或设置 GH_TOKEN / GITHUB_TOKEN（触发发布需要仓库 Contents 和 Actions 写权限）。");
 }
 
 function request(token, method, url, { json, file } = {}) {
@@ -70,11 +69,13 @@ function matches(remote, local) {
 }
 
 class GithubPublisher {
-  constructor(call) { this.call = call; this.api = `https://api.github.com/repos/${REPOSITORY}`; }
+  constructor(call, { actionsToken = false } = {}) { this.call = call; this.api = `https://api.github.com/repos/${REPOSITORY}`; this.actionsToken = actionsToken; }
 
   async preflight(version, commit) {
     const repo = await this.call("GET", this.api);
-    if (!repo.permissions?.push && !repo.permissions?.admin && !repo.permissions?.maintain) throw new Error("GitHub 凭据没有该仓库的 Release 发布权限。");
+    // Installation tokens (including GITHUB_TOKEN) do not expose user permissions.
+    // The workflow declares contents: write; the API enforces that permission.
+    if (!this.actionsToken && !repo.permissions?.push && !repo.permissions?.admin && !repo.permissions?.maintain) throw new Error("GitHub 凭据没有该仓库的 Release 发布权限。");
     const file = await this.call("GET", `${this.api}/contents/package.json?ref=${encodeURIComponent(commit)}`);
     const remotePackage = JSON.parse(Buffer.from(file.content, "base64").toString("utf8"));
     if (remotePackage.version !== version) throw new Error("该版本的代码提交尚未在 GitHub。请先提交并推送版本代码，再发布。");
@@ -141,11 +142,12 @@ class GithubPublisher {
   }
 }
 
-async function localAssets(version) {
+async function localAssets(version, commit) {
   const directory = path.join(ROOT, `release/github-${version}`);
   const index = JSON.parse(await fsp.readFile(path.join(directory, "verified-assets.json"), "utf8"));
   const names = [`Codex-Speed-Pet-Setup-${version}.exe`, `Codex-Speed-Pet-portable-${version}.zip`, "SHA256SUMS.txt", "README.txt"];
   if (index.version !== version || index.assets.length !== names.length || new Set(index.assets.map(asset => asset.name)).size !== names.length) throw new Error("Release asset index mismatch");
+  if (commit && index.sourceCommit !== commit) throw new Error("Release artifacts were built from a different source commit");
   const assets = [];
   for (const name of names) {
     const expected = index.assets.find(asset => asset.name === name);
@@ -155,30 +157,41 @@ async function localAssets(version) {
     if (stat.size !== expected.size || await hashFile(file) !== expected.sha256) throw new Error(`Local asset checksum mismatch: ${name}`);
     assets.push({ ...expected, file });
   }
-  await verifyRelease(path.join(directory, "win-unpacked/resources/app.asar"), version);
+  await require("./verify-release.cjs").verifyRelease(path.join(directory, "win-unpacked/resources/app.asar"), version);
   return assets;
 }
 
-async function main(args) {
-  const version = JSON.parse(await fsp.readFile(path.join(ROOT, "package.json"), "utf8")).version;
+function sourceContext() {
+  const version = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8")).version;
   if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error("Invalid release version");
   const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: ROOT, encoding: "utf8", windowsHide: true });
   const commit = head.stdout?.trim();
   if (head.status !== 0 || !/^[a-f0-9]{40}$/.test(commit)) throw new Error("Cannot identify the source commit");
   const dirty = spawnSync("git", ["status", "--porcelain"], { cwd: ROOT, encoding: "utf8", windowsHide: true });
   if (dirty.status !== 0 || dirty.stdout.trim()) throw new Error("发布前必须提交所有修改；构建代码必须与 GitHub 源提交一致。");
+  return { version, commit };
+}
+
+function assertActionsContext({ version, commit }, env = process.env) {
+  if (env.GITHUB_ACTIONS !== "true" || env.GITHUB_REPOSITORY !== REPOSITORY || env.GITHUB_SHA !== commit || env.GITHUB_REF !== `refs/tags/v${version}` || env.GITHUB_EVENT_NAME !== "workflow_dispatch") {
+    throw new Error("Release 上传必须在对应版本标签的 GitHub Actions 中执行；请使用 npm run publish:github。");
+  }
+}
+
+async function main(args) {
+  const context = sourceContext();
+  assertActionsContext(context);
+  const { version, commit } = context;
   const token = getToken();
-  const publisher = new GithubPublisher((...parameters) => request(token, ...parameters));
+  const publisher = new GithubPublisher((...parameters) => request(token, ...parameters), { actionsToken: true });
   await publisher.preflight(version, commit);
   if (args.includes("--preflight")) {
     console.log(`GitHub Releases preflight passed: ${REPOSITORY}, v${version}, source ${commit.slice(0, 7)}`);
     return;
   }
-  const notesPosition = args.indexOf("--notes");
-  const notes = notesPosition < 0 ? "" : args[notesPosition + 1] || "";
-  const url = await publisher.publish(version, commit, await localAssets(version), notes);
+  const url = await publisher.publish(version, commit, await localAssets(version, commit), process.env.RELEASE_NOTES || "");
   console.log(`GitHub release published and verified: ${url}`);
 }
 
-module.exports = { GithubPublisher, matches };
+module.exports = { GithubPublisher, matches, request, getToken, sourceContext, assertActionsContext, localAssets, REPOSITORY, ROOT };
 if (require.main === module) main(process.argv.slice(2)).catch(error => { console.error(error.message); process.exitCode = 1; });

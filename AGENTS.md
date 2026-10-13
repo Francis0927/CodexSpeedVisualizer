@@ -11,4 +11,6 @@
 - 打包校验成功后，通过 `scripts/prune-local-releases.ps1` 清理本地 `release/` 下可识别旧版本的安装包、便携 ZIP、校验附属文件、历史无更新地址目录、GitHub 上传目录和旧构建目录，仅保留最新版本。成功后清理该版本已完成的隔离源码、临时便携目录和失败构建缓存。
 - 打包失败不清理旧包；不删除更高版本、未知文件、本机便携程序运行目录，不修改源码或本机遗留配置。清理不跟随符号链接或目录联接，占用无法删除须明确报告。
 - 一键发布使用 `npm run publish:github -- -Notes "更新说明"`；仅构建使用 `npm run dist:release`。
+- 一键发布仅触发并等待 `.github/workflows/release.yml`，安装包和便携 ZIP 在 GitHub Actions 的 Windows runner 上构建、校验和上传；保留本地打包脚本，正式发布不使用本机包。
+- 工作流先保存已验证产物再上传 Release，重试复用同版本、同提交的 Actions 产物，不重新生成已有附件；产物过期且 Release 已有附件时必须递增版本号。工作流须先推送到默认分支，发布凭据需要 Contents 与 Actions 写权限，runner 使用内置 `GITHUB_TOKEN`。
 - 旧内网版和旧无更新地址版手动升级一次，之后统一从 GitHub 更新；不保留内网过渡发布流程。

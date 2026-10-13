@@ -49,7 +49,7 @@ npm run dist:portable
 
 版本以 `package.json` 的 `version` 为准，每次发布递增，不以同一版本发布不同内容。可用 `npm version x.y.z --no-git-tag-version` 修改版本。
 
-生成供 GitHub 发布的全部文件：
+本地生成全部发布文件（保留用于离线构建和验证）：
 
 ```powershell
 npm run dist:release
@@ -70,15 +70,21 @@ npm run dist:release
 npm run publish:github -- -Notes "更新说明"
 ```
 
-发布前将全部代码修改提交并推送到 GitHub；工作区必须干净，标签 `vx.y.z` 对应本次代码提交。脚本只从 `GH_TOKEN`、`GITHUB_TOKEN` 或 Git 凭据管理器读取发布凭据，不写入仓库、发布包或日志。
+首次使用前，将 `.github/workflows/release.yml` 提交并推送到 GitHub 的默认分支，并启用仓库的 Actions。之后每次发布前将全部代码修改提交并推送到 GitHub；工作区必须干净。脚本检查或创建指向本次提交的 `vx.y.z` 标签，不覆盖已有标签。
 
-流程：检查代码提交、版本标签和发布权限 → 隔离构建并校验 → 创建或复用 GitHub 草稿 → 上传四个附件 → 核对服务器上的 SHA-256 与大小 → 正式发布。上传失败保留草稿和本地产物，重试补齐附件；同名但校验不同的附件不覆盖，既有正式 Release 不改写。
+本地脚本只从 `GH_TOKEN`、`GITHUB_TOKEN` 或 Git 凭据管理器读取凭据，需要仓库 **Contents 和 Actions 写权限**，不写入仓库、发布包或日志。Actions 使用内置 `GITHUB_TOKEN`，无需额外配置发布密钥。
+
+流程：本地检查已推送提交和版本标签 → 触发 GitHub Actions → Windows runner 使用锁定依赖运行测试、隔离构建和校验 → 保存已验证产物 → 创建或复用 GitHub 草稿 → 上传四个附件 → 核对服务器 SHA-256 与大小 → 正式发布。本地命令显示 Actions 链接并等待结果，失败或超时会返回错误；超时后先检查工作流状态。正式发布不读取或上传本机 `release/` 下的包。
+
+也可在 GitHub 的 **Actions → Windows release → Run workflow** 中选择已推送的 `vx.y.z` 标签，填写 `notes` 发布说明；标签必须与包内版本一致，不能选择普通分支。`request_id` 可留空。工作流仅手动触发，普通代码推送不会发布。
+
+上传前保存的 Actions 产物保留 90 天（受仓库保留策略限制）。上传失败保留草稿，重新执行发布命令或在 Actions 重新运行时，复用同版本、同提交的已验证产物并补齐附件；不会重新生成安装包。已有附件但保存产物过期或丢失时要求递增版本号。同名但大小或 SHA-256 不同的附件不覆盖，既有正式 Release 不改写。构建失败时另外保留可用的诊断产物 14 天，可从对应 Actions 运行页面下载。
 
 已存在的同版本构建仅在输入和校验完全一致时复用。内容变化必须增加版本号。历史 Release 附件保持原样，新版使用上述名称。
 
 ### 本地产物清理
 
-打包校验成功后使用 `scripts/prune-local-releases.ps1` 清理 `release/` 下可识别的旧版本包、历史无更新地址目录、上传目录和构建缓存；当前版本已完成的临时源码及便携目录也清理。
+本地打包校验成功后使用 `scripts/prune-local-releases.ps1` 清理 `release/` 下可识别的旧版本包、历史无更新地址目录、上传目录和构建缓存；当前版本已完成的临时源码及便携目录也清理。Actions 构建在 runner 上执行相同的清理，不影响本机文件；发布命令本身不清理本机旧包。
 
 打包失败保留旧包。保留当前和更高版本、未知文件、本机便携程序运行目录；不跟随符号链接或目录联接。文件占用导致清理失败时明确报告，释放占用后可重试。
 

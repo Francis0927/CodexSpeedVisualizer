@@ -1,0 +1,96 @@
+name: Windows release
+run-name: Release ${{ github.ref_name }} (${{ inputs.request_id || github.run_id }})
+
+on:
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: Release notes
+        type: string
+        default: ''
+      request_id:
+        description: Correlation ID used by the local publisher (optional)
+        type: string
+        default: ''
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: github-release-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.repository == 'Francis0927/CodexSpeedVisualizer'
+    runs-on: windows-2022
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Check source, version tag and reusable artifacts
+        id: prepare
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release-actions.cjs --prepare
+
+      - name: Test
+        run: npm test
+
+      - name: Restore verified artifacts for an upload retry
+        if: steps.prepare.outputs.artifact_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.prepare.outputs.artifact_id }}
+          run-id: ${{ steps.prepare.outputs.artifact_run_id }}
+          github-token: ${{ github.token }}
+          path: release/github-${{ steps.prepare.outputs.version }}
+          merge-multiple: true
+
+      - name: Build and verify installer and portable ZIP
+        if: steps.prepare.outputs.artifact_id == ''
+        run: npm run dist:release
+
+      # Save exact binaries BEFORE any Release upload. Retries download these
+      # bytes instead of rebuilding an NSIS installer with a different digest.
+      - name: Preserve verified artifacts
+        if: steps.prepare.outputs.artifact_id == ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.prepare.outputs.artifact_name }}
+          path: release/github-${{ steps.prepare.outputs.version }}/
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 0
+          overwrite: false
+
+      - name: Upload to draft, verify remote SHA-256, then publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_NOTES: ${{ inputs.notes }}
+        run: node scripts/publish-github.cjs
+
+      - name: Preserve failed build diagnostics
+        if: failure() && steps.prepare.outputs.artifact_id == ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: failed-release-${{ github.run_id }}-${{ github.run_attempt }}
+          path: release/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
+          compression-level: 0
