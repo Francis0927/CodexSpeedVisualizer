@@ -106,6 +106,8 @@ test("checks deduplicate concurrent requests and report newer, equal, older and 
   resolve(JSON.stringify(release()));
   assert.equal((await first).state, "available");
   assert.equal(count, 1);
+  assert.equal(sample.quit(), 0, "detecting a newer version must never quit the app");
+  assert.deepEqual(sample.calls, [], "detecting a newer version must never download or launch an update");
   for (const version of ["1.2.3", "1.2.2"]) {
     sample.github.readText = async () => JSON.stringify(release(version));
     assert.equal((await sample.updater.checkForUpdate()).state, "latest");

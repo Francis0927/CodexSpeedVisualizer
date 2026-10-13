@@ -68,7 +68,7 @@ export type AppInfo = {
 declare global {
   interface Window {
     speedPet?: {
-      getInitial(): Promise<{ usage: UsageSnapshot; settings: AppSettings; appInfo: AppInfo }>;
+      getInitial(): Promise<{ usage: UsageSnapshot; settings: AppSettings; appInfo: AppInfo; updateStatus: UpdateStatus }>;
       updateSettings(patch: Partial<AppSettings>): Promise<AppSettings>;
       resetHistory(): Promise<UsageSnapshot>;
       setPanelOpen(open: boolean): void;
@@ -80,6 +80,7 @@ declare global {
       onUsage(callback: (usage: UsageSnapshot) => void): () => void;
       onSettings(callback: (settings: AppSettings) => void): () => void;
       onUpdateStatus(callback: (status: UpdateStatus) => void): () => void;
+      onOpenSettings(callback: () => void): () => void;
     };
   }
 }

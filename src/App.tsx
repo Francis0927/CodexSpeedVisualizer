@@ -128,16 +128,14 @@ export default function App() {
   useEffect(() => {
     let mounted = true;
     window.speedPet?.getInitial().then((initial) => {
-      if (mounted) { setUsage(initial.usage); setSettings(initial.settings); setAppInfo(initial.appInfo); }
+      if (mounted) { setUsage(initial.usage); setSettings(initial.settings); setAppInfo(initial.appInfo); setUpdateStatus(initial.updateStatus); }
     });
     const offUsage = window.speedPet?.onUsage(setUsage);
     const offSettings = window.speedPet?.onSettings(setSettings);
-    const offUpdate = window.speedPet?.onUpdateStatus((status) => {
-      setUpdateStatus(status);
-      if (status.state === "available") setPanel("settings");
-    });
+    const offUpdate = window.speedPet?.onUpdateStatus(setUpdateStatus);
+    const offOpenSettings = window.speedPet?.onOpenSettings(() => setPanel("settings"));
     const timer = setInterval(() => setClock(Date.now()), 1000);
-    return () => { mounted = false; offUsage?.(); offSettings?.(); offUpdate?.(); clearInterval(timer); };
+    return () => { mounted = false; offUsage?.(); offSettings?.(); offUpdate?.(); offOpenSettings?.(); clearInterval(timer); };
   }, []);
 
   // While a panel is open the main process enlarges the window (small -> medium)
@@ -174,6 +172,7 @@ export default function App() {
     window.speedPet?.resetHistory().then(setUsage).finally(() => setConfirmHistoryReset(false));
   };
   const updateBusy = updateStatus.state === "checking" || updateStatus.state === "downloading" || updateStatus.state === "installing";
+  const updateAvailable = updateStatus.state === "available";
   const updateLabel = updateStatus.state === "checking" ? "正在检查更新…"
     : updateStatus.state === "latest" ? `已是最新（v${appInfo.version}）`
     : updateStatus.state === "available" ? `发现新版本 v${updateStatus.version}${updateStatus.notes ? `：${updateStatus.notes}` : ""}`
@@ -209,7 +208,7 @@ export default function App() {
     <div className="topbar">
       <div className="brand"><span className="brand-icon">✦</span><span>CODEX <strong>DRIVE</strong></span></div>
       <div className="window-actions">
-        <button type="button" className="icon-button" title="设置" aria-label="设置" onClick={() => setPanel(panel === "settings" ? "none" : "settings")}>⚙</button>
+        <button type="button" className={`icon-button ${updateAvailable ? "has-update" : ""}`} title={updateAvailable ? `设置：新版本 v${updateStatus.version} 可更新` : "设置"} aria-label="设置" onClick={() => setPanel(panel === "settings" ? "none" : "settings")}>⚙</button>
         <button type="button" className="icon-button" title="隐藏到托盘" aria-label="隐藏到托盘" onClick={() => window.speedPet?.hide()}>−</button>
       </div>
     </div>
@@ -220,7 +219,7 @@ export default function App() {
 
     <div className="statistics">
     <button type="button" className="speed-card" onClick={() => setPanel(panel === "details" ? "none" : "details")} title="查看统计详情">
-      <div className="speed-top"><span>输出速度</span><span className="live-tag">平滑</span></div>
+      <div className="speed-top"><span>输出速度</span><span className={`live-tag ${updateAvailable ? "has-update" : ""}`} title={updateAvailable ? `新版本 v${updateStatus.version} 可用，请打开设置更新` : undefined}>{updateAvailable ? "有更新" : "平滑"}</span></div>
       <div className="speed-number"><strong>{speedLabel}</strong><span>token/s</span></div>
       <div className="today-line"><span>今日累计</span><strong>{shortCount(usage.total)} <small>token</small></strong></div>
       <div className="history-line"><span>历史累计</span><strong>{shortCount(usage.historyTotal)} <small>token</small></strong></div>

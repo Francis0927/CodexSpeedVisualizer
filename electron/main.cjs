@@ -161,7 +161,11 @@ function rebuildTrayMenu() {
     { label: "开机启动", type: "checkbox", checked: settings.launchAtLogin, click: (item) => updateSettings({ launchAtLogin: item.checked }) },
     { label: "检查更新", click: () => {
       updater.checkForUpdate().then((result) => {
-        if (result.state === "available") { window?.show(); window?.focus(); }
+        if (result.state === "available" && window && !window.isDestroyed()) {
+          window.webContents.send("app:openSettings");
+          window.show();
+          window.focus();
+        }
       });
     } },
     { type: "separator" },
@@ -177,43 +181,54 @@ function createTray() {
   rebuildTrayMenu();
 }
 
-app.whenReady().then(() => {
-  loadSettings();
-  collector.historyResetAt = Number.isFinite(settings.historyResetAt) && settings.historyResetAt >= 0 ? settings.historyResetAt : 0;
-  createWindow();
-  createTray();
-  collector.start((snapshot) => {
-    if (window && !window.isDestroyed()) window.webContents.send("usage:update", snapshot);
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (!window || window.isDestroyed()) return;
+    if (window.isMinimized()) window.restore();
+    window.show();
+    window.focus();
+    rebuildTrayMenu();
   });
-  ipcMain.handle("app:initial", () => ({ usage: collector.snapshot(), settings: settingsPayload(), appInfo: appInfo() }));
-  ipcMain.handle("app:settings", (_event, patch) => updateSettings(patch));
-  ipcMain.handle("app:resetHistory", () => {
-    settings.historyResetAt = Date.now();
-    saveSettings();
-    return collector.resetHistory(settings.historyResetAt);
-  });
-  ipcMain.on("app:panel", (_event, open) => setPanelOpen(open));
-  ipcMain.on("app:contentSize", (_event, size) => setContentSize(size));
-  ipcMain.handle("app:checkUpdate", () => updater.checkForUpdate());
-  ipcMain.handle("app:installUpdate", () => updater.installUpdate());
-  ipcMain.on("app:hide", () => { window?.hide(); rebuildTrayMenu(); });
-  ipcMain.on("app:quit", () => { quitting = true; app.quit(); });
-});
 
-updater.init({
-  onStatus: (status) => { if (window && !window.isDestroyed()) window.webContents.send("update:status", status); },
-  requestQuit: () => { quitting = true; app.quit(); }
-});
+  app.whenReady().then(() => {
+    loadSettings();
+    collector.historyResetAt = Number.isFinite(settings.historyResetAt) && settings.historyResetAt >= 0 ? settings.historyResetAt : 0;
+    createWindow();
+    createTray();
+    collector.start((snapshot) => {
+      if (window && !window.isDestroyed()) window.webContents.send("usage:update", snapshot);
+    });
+    ipcMain.handle("app:initial", () => ({ usage: collector.snapshot(), settings: settingsPayload(), appInfo: appInfo(), updateStatus: updater.getStatus() }));
+    ipcMain.handle("app:settings", (_event, patch) => updateSettings(patch));
+    ipcMain.handle("app:resetHistory", () => {
+      settings.historyResetAt = Date.now();
+      saveSettings();
+      return collector.resetHistory(settings.historyResetAt);
+    });
+    ipcMain.on("app:panel", (_event, open) => setPanelOpen(open));
+    ipcMain.on("app:contentSize", (_event, size) => setContentSize(size));
+    ipcMain.handle("app:checkUpdate", () => updater.checkForUpdate());
+    ipcMain.handle("app:installUpdate", () => updater.installUpdate());
+    ipcMain.on("app:hide", () => { window?.hide(); rebuildTrayMenu(); });
+    ipcMain.on("app:quit", () => { quitting = true; app.quit(); });
+    updater.init({
+      onStatus: (status) => { if (window && !window.isDestroyed()) window.webContents.send("update:status", status); },
+      requestQuit: () => { quitting = true; app.quit(); }
+    });
+  });
+
+  app.on("before-quit", () => {
+    quitting = true;
+    topmostGuard?.dispose();
+    updater.stop();
+    collector.stop();
+    if (savePositionTimer) { clearTimeout(savePositionTimer); saveSettings(); }
+  });
+  app.on("window-all-closed", () => { /* Keep the tray app alive. */ });
+}
 
 function appInfo() {
   return { version: app.getVersion(), buildKind: updater.buildKind(), updateEnabled: updater.updateEnabled() };
 }
-
-app.on("before-quit", () => {
-  quitting = true;
-  topmostGuard?.dispose();
-  updater.stop();
-  collector.stop();
-  if (savePositionTimer) { clearTimeout(savePositionTimer); saveSettings(); }
-});
-app.on("window-all-closed", () => { /* Keep the tray app alive. */ });

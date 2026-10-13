@@ -10,6 +10,11 @@ contextBridge.exposeInMainWorld("speedPet", {
   installUpdate: () => ipcRenderer.invoke("app:installUpdate"),
   hide: () => ipcRenderer.send("app:hide"),
   quit: () => ipcRenderer.send("app:quit"),
+  onOpenSettings: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on("app:openSettings", listener);
+    return () => ipcRenderer.removeListener("app:openSettings", listener);
+  },
   onUsage: (callback) => {
     const listener = (_event, snapshot) => callback(snapshot);
     ipcRenderer.on("usage:update", listener);

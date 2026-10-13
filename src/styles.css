@@ -36,6 +36,7 @@ button { font: inherit; }
 .speed-card:hover { border-color: rgba(173, 255, 175, .55); }
 .speed-top { display: flex; align-items: center; justify-content: space-between; color: #c3e2d8; font-size: calc(11px * var(--text-scale)); font-weight: 700; }
 .live-tag { border: 1px solid rgba(178, 244, 195, .3); padding: 2px 6px; border-radius: 10px; color: #c7f8d1; font-size: calc(10px * var(--text-scale)); }
+.icon-button.has-update, .live-tag.has-update { color: #baff9b; background: rgba(150, 255, 214, .11); }
 .speed-number { display: flex; align-items: baseline; gap: 6px; min-height: 46px; margin: 4px 0; line-height: 1; }
 .speed-number strong { font-size: 42px; font-weight: 760; letter-spacing: -.065em; font-variant-numeric: tabular-nums; }
 .speed-number span { color: #b9d9ce; font-size: 12px; font-weight: 700; }
