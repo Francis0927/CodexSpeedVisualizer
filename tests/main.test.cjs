@@ -21,9 +21,10 @@ async function fixture(lock = true) {
     isDestroyed() { return false; }
     isVisible() { return this.shown > 0; }
     isMinimized() { return this.minimized; }
-    restore() { this.minimized = false; }
-    show() { this.shown++; }
-    focus() { this.focused++; }
+    restore() { this.minimized = false; this.emit('restore'); }
+    show() { this.shown++; this.emit('show'); }
+    focus() { this.focused++; this.emit('focus'); }
+    setSkipTaskbar(value) { this.skipTaskbar = value; this.taskbarCalls = (this.taskbarCalls || 0) + 1; }
     setMenuBarVisibility() {}
     loadFile() {}
   }
@@ -41,7 +42,7 @@ async function fixture(lock = true) {
   };
   const electron = { app, BrowserWindow: Window, Tray, ipcMain,
     Menu: { buildFromTemplate: value => value }, screen: { getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }) },
-    nativeImage: { createFromPath: () => ({ resize() { return {}; } }) } };
+    nativeImage: { createFromPath: file => { calls.trayIcon = file; return { resize() { return {}; } }; } } };
   const loaded = { exports: {} };
   vm.runInNewContext(fs.readFileSync(path.resolve(__dirname, '../electron/main.cjs'), 'utf8'), {
     module: loaded, __dirname: path.resolve(__dirname, '../electron'), process: { env: {}, platform: 'win32' },
@@ -76,6 +77,27 @@ test('a repeat launch restores and focuses the existing dashboard', async () => 
   assert.equal(calls.windows.length, 1);
   assert.equal(calls.starts, 1);
   assert.equal(calls.updates, 1);
+});
+
+test('dashboard stays off the Windows taskbar across show, restore, focus and tray actions', async () => {
+  const { calls, app } = await fixture();
+  const window = calls.windows[0];
+  assert.equal(window.bounds.skipTaskbar, true);
+  assert.equal(window.bounds.type, 'toolbar');
+  assert.equal(window.bounds.icon, calls.trayIcon, 'window and tray must use the same artwork');
+  assert.equal(window.skipTaskbar, true);
+  for (const event of ['show', 'restore', 'focus']) {
+    window.skipTaskbar = false;
+    window.emit(event);
+    assert.equal(window.skipTaskbar, true, event);
+  }
+  window.skipTaskbar = false;
+  calls.trays[0].emit('double-click');
+  assert.equal(window.skipTaskbar, true);
+  window.skipTaskbar = false;
+  window.minimized = true;
+  app.emit('second-instance');
+  assert.equal(window.skipTaskbar, true);
 });
 
 test('initial IPC retains available updates; only manual tray checks request settings', async () => {

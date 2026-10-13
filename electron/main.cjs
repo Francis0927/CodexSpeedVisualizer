@@ -4,6 +4,7 @@ const path = require("node:path");
 const { UsageCollector } = require("./usage.cjs");
 const updater = require("./update.cjs");
 const { createTopmostGuard } = require("./topmost.cjs");
+const ICON_PATH = path.join(__dirname, "..", "assets", "icon.png");
 
 if (process.env.CODEX_SPEED_PET_DEBUG_PORT) app.commandLine.appendSwitch("remote-debugging-port", process.env.CODEX_SPEED_PET_DEBUG_PORT);
 const collector = new UsageCollector();
@@ -116,6 +117,10 @@ function createWindow() {
     show: false,
     alwaysOnTop: settings.alwaysOnTop,
     skipTaskbar: true,
+    // skipTaskbar only removes the current Shell tab in Electron 29. A native
+    // tool window also stays excluded when Windows rebuilds the taskbar.
+    ...(process.platform === "win32" ? { type: "toolbar" } : {}),
+    icon: ICON_PATH,
     backgroundColor: "#00000000",
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
@@ -124,6 +129,11 @@ function createWindow() {
       sandbox: true
     }
   });
+  const hideTaskbarEntry = () => {
+    if (!window.isDestroyed()) window.setSkipTaskbar(true);
+  };
+  for (const event of ["show", "restore", "focus"]) window.on(event, hideTaskbarEntry);
+  hideTaskbarEntry();
   topmostGuard = createTopmostGuard(window);
   topmostGuard.apply(settings.alwaysOnTop);
   window.setMenuBarVisibility(false);
@@ -174,7 +184,7 @@ function rebuildTrayMenu() {
 }
 
 function createTray() {
-  const icon = nativeImage.createFromPath(path.join(__dirname, "..", "assets", "icon.png"));
+  const icon = nativeImage.createFromPath(ICON_PATH);
   tray = new Tray(icon.resize({ width: 20, height: 20 }));
   tray.setToolTip("Codex Drive");
   tray.on("double-click", () => { window?.show(); window?.focus(); rebuildTrayMenu(); });

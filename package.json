@@ -1,6 +1,6 @@
 {
   "name": "codex-speed-pet",
-  "version": "0.5.11",
+  "version": "0.5.12",
   "private": true,
   "description": "A local Codex token speed car dashboard",
   "main": "electron/main.cjs",
@@ -29,6 +29,7 @@
     "@vitejs/plugin-react": "^4.3.0",
     "electron": "^29.4.6",
     "electron-builder": "^24.13.3",
+    "rcedit": "4.0.1",
     "typescript": "^5.5.4",
     "vite": "^5.4.0"
   },
@@ -46,6 +47,7 @@
       "assets/**/*",
       "package.json"
     ],
+    "afterPack": "scripts/set-executable-icon.cjs",
     "win": {
       "target": "nsis",
       "icon": "assets/icon.ico",

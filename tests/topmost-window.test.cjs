@@ -29,14 +29,16 @@ for ($i = 0; $i -lt 10000 -and $cursor -ne [IntPtr]::Zero; $i++) {
   if ($cursor -eq $petHandle) { $petAbove = $true; break }
   $cursor = [WindowOrder]::GetWindow($cursor, 3)
 }
-@{ petAbove = $petAbove; foreground = [WindowOrder]::GetForegroundWindow().ToInt64().ToString(); topmost = ([WindowOrder]::GetWindowLong($petHandle, -20) -band 8) -ne 0 } | ConvertTo-Json -Compress
+$style = [WindowOrder]::GetWindowLong($petHandle, -20)
+@{ petAbove = $petAbove; foreground = [WindowOrder]::GetForegroundWindow().ToInt64().ToString(); topmost = ($style -band 8) -ne 0; toolWindow = ($style -band 0x80) -ne 0; appWindow = ($style -band 0x40000) -ne 0 } | ConvertTo-Json -Compress
 `;
   return JSON.parse(execFileSync("powershell.exe", ["-NoProfile", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")], { encoding: "utf8", windowsHide: true, timeout: 10000 }));
 }
 
 app.whenReady().then(async () => {
   assert.equal(process.platform, "win32", "this regression checks native Windows z-order");
-  const pet = new BrowserWindow({ width: 180, height: 120, x: 30, y: 30, frame: false, transparent: true, show: false, skipTaskbar: true });
+  const pet = new BrowserWindow({ width: 180, height: 120, x: 30, y: 30, frame: false, transparent: true, show: false, skipTaskbar: true, type: 'toolbar' });
+  for (const event of ['show', 'restore', 'focus']) pet.on(event, () => pet.setSkipTaskbar(true));
   const blocker = new BrowserWindow({ width: 210, height: 150, x: 30, y: 30, show: false, alwaysOnTop: true, skipTaskbar: true });
   await pet.loadURL("data:text/html,<body style='background:%23333;color:white'>Topmost recovery test</body>");
   await blocker.loadURL("data:text/html,<body>Other topmost app</body>");
@@ -61,6 +63,8 @@ app.whenReady().then(async () => {
   assert.notEqual(overlay.foreground, pet.getNativeWindowHandle().readBigUInt64LE().toString(), "maintenance must not steal foreground focus");
   assert.equal(pet.isAlwaysOnTop(), true, "dashboard must retain ordinary topmost behavior");
   assert.equal(overlay.topmost, true, "native topmost flag must survive show and maintenance");
+  assert.equal(overlay.toolWindow, true, 'native tool-window style must exclude the dashboard from the taskbar');
+  assert.equal(overlay.appWindow, false, 'dashboard must not force a taskbar button');
   blocker.setAlwaysOnTop(false); blocker.moveTop();
   assert.equal(nativeState(pet, blocker).petAbove, true, "a normal window must stay below the dashboard");
   pet.setBounds({ x: 45, y: 45, width: 220, height: 180 });
@@ -81,6 +85,10 @@ app.whenReady().then(async () => {
   assert.equal(pet.isVisible(), false, "a hidden dashboard must stay hidden");
   pet.showInactive();
   assert.equal(nativeState(pet, blocker).petAbove, true, "show must restore z-order immediately");
+  pet.minimize(); pet.restore(); pet.focus();
+  const restored = nativeState(pet, blocker);
+  assert.equal(restored.toolWindow, true, 'hide/show, minimize/restore and focus must retain taskbar exclusion');
+  assert.equal(restored.appWindow, false);
   guard.dispose(); pet.destroy(); blocker.destroy();
   console.log("Native Windows screenshot overlay z-order, ordinary topmost, foreground focus, lost flag, disabled setting and hide/show: passed");
   app.quit();

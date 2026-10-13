@@ -53,7 +53,7 @@ try {
       Where-Object { $_.Name -notin @('update-share.json', 'update-share.example.json') }
   }
   $sourceDescription = @('github-release-v2', ($package | ConvertTo-Json -Depth 20 -Compress))
-  foreach ($relative in @('package-lock.json', 'scripts/package-release.ps1', 'scripts/verify-release.cjs')) {
+  foreach ($relative in @('package-lock.json', 'scripts/package-release.ps1', 'scripts/verify-release.cjs', 'scripts/set-executable-icon.cjs')) {
     $sourceDescription += $relative + ':' + (Get-PackageFileHash -LiteralPath (Join-Path $root $relative)).Hash
   }
   # Local builds from a downloaded source ZIP still work without Git metadata.
@@ -92,6 +92,8 @@ try {
     New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
     Copy-Item -LiteralPath $file.FullName -Destination $destination
   }
+  New-Item -ItemType Directory -Path (Join-Path $stage 'scripts') -Force | Out-Null
+  Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'set-executable-icon.cjs') -Destination (Join-Path $stage 'scripts')
   $build = $package.build
   $build.electronDist = Join-Path $root 'node_modules\electron\dist'
   $build.directories.output = $output

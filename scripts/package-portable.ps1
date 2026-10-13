@@ -35,5 +35,7 @@ $version = (Get-Content -LiteralPath (Join-Path $root 'package.json') -Raw | Con
 $manifest = @{ name = 'codex-speed-pet'; version = $version; main = 'electron/main.cjs' } | ConvertTo-Json
 [System.IO.File]::WriteAllText((Join-Path $app 'package.json'), $manifest, (New-Object System.Text.UTF8Encoding $false))
 Rename-Item -LiteralPath (Join-Path $target 'electron.exe') -NewName 'Codex Speed Pet.exe'
+node (Join-Path $PSScriptRoot 'set-executable-icon.cjs') (Join-Path $target 'Codex Speed Pet.exe')
+if ($LASTEXITCODE -ne 0) { throw 'Portable executable icon update failed.' }
 & (Join-Path $PSScriptRoot 'prune-local-releases.ps1') -CurrentVersion $version -Mode Portable -PortableDirectory $target
 Write-Output (Join-Path $target 'Codex Speed Pet.exe')
