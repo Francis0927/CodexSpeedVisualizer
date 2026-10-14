@@ -9,16 +9,16 @@ const data = fs.mkdtempSync(path.join(os.tmpdir(), 'speed-pet-update-window-test
 app.setPath('userData', data);
 app.disableHardwareAcceleration();
 fs.writeFileSync(path.join(data, 'settings.json'), JSON.stringify({ size: 'small', autoHideChrome: true, reducedMotion: true }));
-const { UsageCollector } = require('../electron/usage.cjs');
+const { UsageCollector } = require('./electron/usage.cjs');
 UsageCollector.prototype.start = function () {};
-const updater = require('../electron/update.cjs');
+const updater = require('./electron/update.cjs');
 updater.init = function () {};
 updater.updateEnabled = () => true;
 updater.buildKind = () => 'installed';
 BrowserWindow.prototype.show = function () {};
 const reports = [], boundsChanges = [], crashes = [];
 ipcMain.on('app:contentSize', (_event, size) => reports.push(size));
-const mainPath = path.resolve(__dirname, '../electron/main.cjs');
+const mainPath = path.resolve(__dirname, './electron/main.cjs');
 const loadModule = Module._load;
 Module._load = function (request, parent, isMain) {
   if (request === 'electron' && parent?.filename === mainPath) {

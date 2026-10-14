@@ -1,61 +1,40 @@
 {
   "name": "codex-speed-pet",
-  "version": "0.5.12",
+  "version": "0.6.4",
   "private": true,
   "description": "A local Codex token speed car dashboard",
-  "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "start": "electron .",
+    "start": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/tauri.ps1 dev",
+    "tauri": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/tauri.ps1",
+    "test:rust": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/rust.ps1 test --locked",
+    "test:parity": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/rust.ps1 build --locked && node tests/tauri-parity.test.cjs",
     "build": "tsc --noEmit && vite build",
-    "test": "node --test tests/usage.test.cjs tests/topmost.test.cjs tests/release.test.cjs tests/release-actions.test.cjs tests/prune-local.test.cjs tests/update.test.cjs tests/main.test.cjs",
-    "dist:portable": "npm run build && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-portable.ps1",
-    "dist": "npm run build && electron-builder --win nsis && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prune-local-releases.ps1 -Mode Installer",
+    "test": "npm run test:reference && npm run test:rust && npm run test:parity && node --test tests/tauri-update.test.cjs tests/tauri-release.test.cjs",
+    "dist:portable": "npm run dist:release",
+    "dist": "npm run dist:release",
     "prune:local": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prune-local-releases.ps1",
     "publish:github": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/publish-github.ps1",
-    "test:window": "npm run build && electron tests/window.test.cjs",
-    "test:update-window": "npm run build && electron tests/update-window.test.cjs",
-    "test:topmost": "electron tests/topmost-window.test.cjs",
-    "dist:release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-release.ps1"
+    "test:window": "npm run build && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/rust.ps1 build --release --locked --features custom-protocol && node tests/tauri-ui.test.cjs",
+    "test:update-window": "npm run test:window",
+    "test:topmost": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/rust.ps1 build --locked && node tests/tauri-window.test.cjs",
+    "dist:release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-release.ps1",
+    "test:reference": "node --test tests/usage.test.cjs tests/topmost.test.cjs tests/release.test.cjs tests/release-actions.test.cjs tests/prune-local.test.cjs tests/update.test.cjs tests/main.test.cjs"
   },
   "dependencies": {
+    "@tauri-apps/api": "2.12.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@electron/asar": "3.4.1",
+    "@tauri-apps/cli": "2.12.2",
     "@types/node": "^18.19.0",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.0",
-    "electron": "^29.4.6",
-    "electron-builder": "^24.13.3",
-    "rcedit": "4.0.1",
+    "7zip-bin": "5.2.0",
     "typescript": "^5.5.4",
     "vite": "^5.4.0"
-  },
-  "build": {
-    "appId": "dev.codex.speedpet",
-    "productName": "Codex Speed Pet",
-    "electronDist": "node_modules/electron/dist",
-    "directories": {
-      "output": "release"
-    },
-    "files": [
-      "dist/**/*",
-      "electron/**/*",
-      "!electron/update-share*.json",
-      "assets/**/*",
-      "package.json"
-    ],
-    "afterPack": "scripts/set-executable-icon.cjs",
-    "win": {
-      "target": "nsis",
-      "icon": "assets/icon.ico",
-      "signAndEditExecutable": false
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true
-    }
   }
 }

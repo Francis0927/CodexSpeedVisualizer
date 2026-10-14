@@ -39,6 +39,9 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Install locked Rust toolchain
+        run: rustup toolchain install 1.99.0 --profile minimal --target x86_64-pc-windows-msvc
+
       - name: Install locked dependencies
         run: npm ci
 
@@ -50,6 +53,9 @@ jobs:
 
       - name: Test
         run: npm test
+
+      - name: Test actual WebView2 dashboard
+        run: npm run test:window
 
       - name: Test native Windows topmost
         run: npm run test:topmost
@@ -80,6 +86,9 @@ jobs:
           retention-days: 90
           compression-level: 0
           overwrite: false
+
+      - name: Verify actual NSIS install and custom-directory update handoff
+        run: node scripts/verify-installed.cjs release/github-${{ steps.prepare.outputs.version }} ${{ steps.prepare.outputs.version }}
 
       - name: Upload to draft, verify remote SHA-256, then publish
         env:

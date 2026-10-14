@@ -9,7 +9,7 @@ const { Readable } = require("node:stream");
 const { EventEmitter } = require("node:events");
 const { createHash } = require("node:crypto");
 const { spawnSync } = require("node:child_process");
-const github = require("../electron/github-update.cjs");
+const github = require("./reference/electron/github-update.cjs");
 
 function release(version = "1.2.4") {
   return { tag_name: `v${version}`, draft: false, prerelease: false, body: "Release notes", assets:
@@ -76,8 +76,8 @@ function updaterFixture({ packaged = true, installed = false, readText, download
   };
   const loaded = { exports: {} };
   const timer = (fn, delay) => { timers.push({ fn, delay }); return timers.length; };
-  vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../electron/update.cjs"), "utf8"), {
-    module: loaded, __dirname: path.join(__dirname, "../electron"), process, Buffer,
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, "./reference/electron/update.cjs"), "utf8"), {
+    module: loaded, __dirname: path.join(__dirname, "./reference/electron"), process, Buffer,
     setTimeout: timer, setInterval: timer, clearTimeout: () => {},
     require: name => name === "electron" ? { app: { isPackaged: packaged, getVersion: () => "1.2.3", getPath: key => key === "exe" ? "C:\\custom\\Codex Speed Pet.exe" : "C:\\userdata" } }
       : name === "./github-update.cjs" ? shippedGithub : name === "node:fs" ? stubFs : name === "node:fs/promises" ? stubFsp : name === "node:child_process" ? child : require(name)
@@ -172,7 +172,7 @@ test("portable replacement restarts successfully and restores a backup on failur
       const sameTime = new Date("2026-01-01T00:00:00Z");
       for (const folder of [source, target]) await fsp.utimes(path.join(folder, "Codex Speed Pet.exe"), sameTime, sameTime);
       await fsp.writeFile(path.join(target, "old-only.txt"), "old");
-      await fsp.copyFile(path.join(__dirname, "../electron/portable-update.ps1"), path.join(stage, "apply-update.ps1"));
+      await fsp.copyFile(path.join(__dirname, "./reference/electron/portable-update.ps1"), path.join(stage, "apply-update.ps1"));
       await fsp.writeFile(path.join(stage, "update.json"), JSON.stringify({ source, target, exe: "Codex Speed Pet.exe", appPid: 2147483647, logDir }));
       const driver = path.join(stage, "test-driver.ps1");
       await fsp.writeFile(driver, `param([string]$scriptPath)\n$global:starts = 0\nfunction Start-Sleep {}\nfunction Start-Process { $global:starts++; ${failStart ? "if ($global:starts -eq 1) { throw 'simulated restart failure' }" : ""} }\n& $scriptPath\n`, "utf8");

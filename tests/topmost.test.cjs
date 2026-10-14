@@ -1,7 +1,7 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const { EventEmitter } = require("node:events");
-const { createTopmostGuard } = require("../electron/topmost.cjs");
+const { createTopmostGuard } = require("./reference/electron/topmost.cjs");
 
 function fixture() {
   const window = new EventEmitter();

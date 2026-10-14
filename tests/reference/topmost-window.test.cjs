@@ -3,7 +3,7 @@
 const { app, BrowserWindow } = require("electron");
 const assert = require("node:assert/strict");
 const { execFileSync } = require("node:child_process");
-const { createTopmostGuard } = require("../electron/topmost.cjs");
+const { createTopmostGuard } = require("./electron/topmost.cjs");
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 let guard;
 

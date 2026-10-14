@@ -1,57 +1,95 @@
-const fs = require("node:fs");
-const path = require("node:path");
-const assert = require("node:assert/strict");
-const Module = require("node:module");
-const asar = require("@electron/asar");
+const fs = require('node:fs');
+const fsp = require('node:fs/promises');
+const path = require('node:path');
+const assert = require('node:assert/strict');
+const { createHash } = require('node:crypto');
+const { spawnSync } = require('node:child_process');
 
-async function verifyRelease(archive, version, root = path.resolve(__dirname, "..")) {
-  const names = asar.listPackage(archive).map(name => name.replace(/\\/g, "/"));
-  assert.ok(!names.some(name => /(?:^|\/)update-share(?:\.example)?\.json$/i.test(name)), "Package contains a retired update configuration");
-  assert.equal(JSON.parse(asar.extractFile(archive, "package.json")).version, version, "Package version mismatch");
-  const config = path.join(root, "electron/update-share.json");
-  let blocked = [];
-  if (fs.existsSync(config)) {
-    const share = JSON.parse(fs.readFileSync(config, "utf8").replace(/^\uFEFF/, "")).share;
-    if (typeof share === "string" && share) blocked = [share, JSON.stringify(share).slice(1, -1)];
+function run(command, args, options = {}) {
+  const result = spawnSync(command, args, { encoding: 'utf8', windowsHide: true, timeout: 120000, ...options });
+  if (result.error) throw result.error;
+  if (result.status !== 0) throw Error(result.stderr || result.stdout || command + ' failed');
+  return result.stdout;
+}
+async function hashFile(file) {
+  const hash = createHash('sha256');
+  for await (const bytes of fs.createReadStream(file)) hash.update(bytes);
+  return hash.digest('hex');
+}
+function installerPayloadHash(bytes) {
+  // Tauri's bundler changes only this documented runtime bundle-type marker
+  // from UNK to NSS when embedding the EXE in NSIS (tauri-utils/platform.rs).
+  // Compare every other byte; never ignore an arbitrary PE/header difference.
+  const original = Buffer.from('__TAURI_BUNDLE_TYPE_VAR_UNK');
+  const replacement = Buffer.from('__TAURI_BUNDLE_TYPE_VAR_NSS');
+  const offset = bytes.indexOf(original);
+  assert.ok(offset >= 0 && bytes.indexOf(original, offset + original.length) < 0, 'Expected one Tauri bundle-type marker');
+  const expected = Buffer.from(bytes);
+  replacement.copy(expected, offset);
+  return createHash('sha256').update(expected).digest('hex');
+}
+function sevenZip() {
+  for (const file of ['C:/Program Files/7-Zip/7z.exe', path.resolve(__dirname, '../node_modules/7zip-bin/win/x64/7za.exe')]) {
+    if (fs.existsSync(file)) return file;
   }
-  for (const name of names.filter(name => /\.(cjs|js|html|json|css|ps1)$/i.test(name))) {
-    const text = asar.extractFile(archive, path.normalize(name.replace(/^\//, ""))).toString("utf8");
-    assert.ok(!blocked.some(address => text.includes(address)), "Package contains a local update address");
-    assert.ok(!text.includes("CODEX_SPEED_PET_UPDATE_SHARE"), "Package still supports the retired updater");
+  throw Error('7-Zip is required to inspect the actual NSIS payload.');
+}
+async function assertTree(directory) {
+  for (const entry of await fsp.readdir(directory, { withFileTypes: true })) {
+    const file = path.join(directory, entry.name);
+    const stat = await fsp.lstat(file);
+    assert.ok(!stat.isSymbolicLink(), 'Package tree must not contain links');
+    assert.ok(!/^(?:update-share.*\.json|app\.asar|node\.exe|electron\.exe)$/i.test(entry.name), 'Retired runtime/configuration in package');
+    if (entry.isDirectory()) await assertTree(file);
   }
-  const cache = new Map();
-  function load(name) {
-    if (cache.has(name)) return cache.get(name).exports;
-    const filename = path.join(root, "release/verification", name);
-    const loaded = new Module(filename, module);
-    loaded.filename = filename;
-    loaded.paths = module.paths;
-    cache.set(name, loaded);
-    loaded.require = dependency => {
-      if (dependency === "electron") return { app: { isPackaged: true, getVersion: () => version } };
-      if (dependency.startsWith("./")) return load(path.posix.join(path.posix.dirname(name), dependency));
-      return require(dependency);
-    };
-    loaded._compile(asar.extractFile(archive, path.normalize(name)).toString("utf8"), filename);
-    return loaded.exports;
+}
+function inspectExe(file, version, kind) {
+  const info = JSON.parse(run(file, ['--package-info']));
+  assert.deepEqual(info, { version, appId: 'dev.codex.speedpet', runtime: 'tauri', frontendEmbedded: true, buildKind: kind, updateEnabled: true, repository: 'Francis0927/CodexSpeedVisualizer' });
+  const quoted = file.replace(/'/g, "''");
+  const peVersion = run('powershell.exe', ['-NoProfile', '-Command', "([Diagnostics.FileVersionInfo]::GetVersionInfo('" + quoted + "')).ProductVersion"]).trim();
+  assert.ok(peVersion === version || peVersion === version + '.0', 'Actual PE version differs: ' + peVersion);
+  return info;
+}
+async function findExe(directory) {
+  const found = [];
+  for (const entry of await fsp.readdir(directory, { withFileTypes: true })) {
+    const file = path.join(directory, entry.name);
+    if (entry.isDirectory()) found.push(...await findExe(file));
+    else if (entry.name === 'Codex Speed Pet.exe') found.push(file);
   }
-  const github = load("electron/github-update.cjs");
-  assert.equal(github.REPOSITORY, "Francis0927/CodexSpeedVisualizer");
-  assert.equal(github.LATEST_URL, `https://api.github.com/repos/${github.REPOSITORY}/releases/latest`);
-  // Exercise the shipped updater using a deterministic latest-release response.
-  github.readText = async url => {
-    assert.equal(url, github.LATEST_URL);
-    return JSON.stringify({ tag_name: `v${version}`, draft: false, prerelease: false });
-  };
-  const updater = load("electron/update.cjs");
-  assert.equal(updater.updateEnabled(), true, "Packaged GitHub updates must be enabled");
-  assert.equal((await updater.checkForUpdate()).state, "latest", "Packaged updater must read the GitHub release feed");
-  updater.stop();
-  assert.ok(names.includes("/electron/portable-update.ps1"), "Portable update helper missing");
+  return found;
+}
+async function verifyRelease(directory, version) {
+  assert.match(version, /^\d+\.\d+\.\d+$/);
+  const app = path.join(directory, 'app');
+  await assertTree(app);
+  assert.deepEqual((await fsp.readdir(app)).sort(), ['Codex Speed Pet.exe', 'build-kind.json']);
+  const exe = path.join(app, 'Codex Speed Pet.exe');
+  inspectExe(exe, version, 'portable');
+  const digest = await hashFile(exe);
+  const temporary = await fsp.mkdtemp(path.join(directory, '.verify-'));
+  try {
+    const installerCheck = path.join(temporary, 'installer');
+    run(sevenZip(), ['x', path.join(directory, 'Codex-Speed-Pet-Setup-' + version + '.exe'), '-o' + installerCheck, '-y'], { maxBuffer: 8 * 1024 * 1024 });
+    const embedded = await findExe(installerCheck);
+    assert.equal(embedded.length, 1, 'Installer must contain one application executable');
+    assert.equal(await hashFile(embedded[0]), installerPayloadHash(await fsp.readFile(exe)), 'Actual NSIS payload differs beyond its Tauri bundle-type marker');
+    await fsp.writeFile(path.join(path.dirname(embedded[0]), 'build-kind.json'), JSON.stringify({ kind: 'installed', appId: 'dev.codex.speedpet' }));
+    inspectExe(embedded[0], version, 'installed');
+    const zipCheck = path.join(temporary, 'zip');
+    run(sevenZip(), ['x', path.join(directory, 'Codex-Speed-Pet-portable-' + version + '.zip'), '-o' + zipCheck, '-y']);
+    await assertTree(zipCheck);
+    assert.deepEqual((await fsp.readdir(zipCheck)).sort(), ['Codex Speed Pet.exe', 'build-kind.json']);
+    assert.equal(await hashFile(path.join(zipCheck, 'Codex Speed Pet.exe')), digest, 'Portable ZIP payload differs');
+    assert.deepEqual(JSON.parse(await fsp.readFile(path.join(zipCheck, 'build-kind.json'), 'utf8')), { kind: 'portable', appId: 'dev.codex.speedpet' });
+    inspectExe(path.join(zipCheck, 'Codex Speed Pet.exe'), version, 'portable');
+  } finally {
+    // This directory is created by this invocation, inside the verified build.
+    assert.equal(path.dirname(temporary), path.resolve(directory));
+    await fsp.rm(temporary, { recursive: true, force: true });
+  }
   return true;
 }
-
-module.exports = { verifyRelease };
-if (require.main === module) verifyRelease(path.resolve(process.argv[2]), process.argv[3]).then(() => {
-  console.log("Release archive verified: version, GitHub updates enabled, no private update configuration/address");
-}).catch(error => { console.error(error.message); process.exitCode = 1; });
+module.exports = { verifyRelease, inspectExe, hashFile, installerPayloadHash, sevenZip, run };
+if (require.main === module) verifyRelease(path.resolve(process.argv[2]), process.argv[3]).then(() => console.log('Tauri EXE, actual NSIS/ZIP payload and GitHub updates verified')).catch(error => { console.error(error.message); process.exitCode = 1; });

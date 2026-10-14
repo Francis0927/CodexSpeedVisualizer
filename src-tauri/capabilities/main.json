@@ -1,0 +1,6 @@
+{
+  "identifier": "dashboard",
+  "description": "Dashboard event subscription and title drag region only",
+  "windows": ["main"],
+  "permissions": ["core:event:default", "core:window:allow-start-dragging"]
+}

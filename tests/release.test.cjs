@@ -1,7 +1,7 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const { GithubPublisher } = require("../scripts/publish-github.cjs");
-const { verifyRelease } = require("../scripts/verify-release.cjs");
+const { verifyRelease } = require("./reference/verify-release.cjs");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const os = require("node:os");
@@ -134,7 +134,7 @@ async function archiveFixture() {
   const source = path.join(root, "source");
   await fs.mkdir(path.join(source, "electron"), { recursive: true });
   await fs.writeFile(path.join(source, "package.json"), JSON.stringify({ version }));
-  for (const name of ["update.cjs", "github-update.cjs", "portable-update.ps1"]) await fs.copyFile(path.resolve(__dirname, "../electron", name), path.join(source, "electron", name));
+  for (const name of ["update.cjs", "github-update.cjs", "portable-update.ps1"]) await fs.copyFile(path.resolve(__dirname, "./reference/electron", name), path.join(source, "electron", name));
   await fs.mkdir(path.join(source, "dist/assets"), { recursive: true });
   await fs.writeFile(path.join(source, "dist/assets/example.js"), "const example = true;");
   return { root, source, archive: path.join(root, "app.asar"), cleanup: () => fs.rm(root, { recursive: true, force: true }) };
