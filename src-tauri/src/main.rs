@@ -69,12 +69,19 @@ fn main() {
                         let mut f = std::fs::OpenOptions::new()
                             .create(true)
                             .append(true)
-                            .open(path)
+                            .open(&path)
                             .unwrap();
                         f.write_all(write["text"].as_str().unwrap().as_bytes())
                             .unwrap();
                     } else {
-                        std::fs::write(path, write["text"].as_str().unwrap()).unwrap();
+                        std::fs::write(&path, write["text"].as_str().unwrap()).unwrap();
+                    }
+                    if let Some(mtime) = write["mtimeMs"].as_u64() {
+                        let modified = std::time::UNIX_EPOCH
+                            .checked_add(std::time::Duration::from_millis(mtime))
+                            .expect("fixture modification time");
+                        std::fs::OpenOptions::new().write(true).open(&path).unwrap()
+                            .set_times(std::fs::FileTimes::new().set_modified(modified)).unwrap();
                     }
                 }
             }

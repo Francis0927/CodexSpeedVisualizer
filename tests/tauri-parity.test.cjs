@@ -20,26 +20,38 @@ async function compare(name, operations) {
   let now = clock;
   const collector = new UsageCollector(nodeHome, () => now);
   const expected = [];
+  const modified = new Map();
   try {
     for (const op of operations) {
       now = op.now;
       for (const write of op.writes || []) {
         const file = path.join(nodeHome, write.file);
-        if (write.delete) await fs.unlink(file);
-        else { await fs.mkdir(path.dirname(file), { recursive: true }); await fs[write.append ? 'appendFile' : 'writeFile'](file, write.text); }
+        if (write.delete) { await fs.unlink(file); modified.delete(write.file); }
+        else {
+          await fs.mkdir(path.dirname(file), { recursive: true });
+          await fs[write.append ? 'appendFile' : 'writeFile'](file, write.text);
+          // Node writes asynchronously; Rust replays synchronously. Do not let
+          // host clock granularity decide whether a same-size rewrite is seen.
+          const mtimeMs = write.mtimeMs ?? op.now;
+          await fs.utimes(file, new Date(mtimeMs), new Date(mtimeMs));
+          modified.set(write.file, mtimeMs);
+        }
       }
       if (op.reset !== undefined) await collector.resetHistory(op.reset); else await collector.poll();
       expected.push(collector.snapshot());
     }
-    const ops = operations.map(op => ({ ...op, writes: op.writes?.map(write => ({ ...write, path: path.join(rustHome, write.file) })) }));
+    const ops = operations.map(op => ({ ...op, writes: op.writes?.map(write => ({ ...write, mtimeMs: write.mtimeMs ?? op.now, path: path.join(rustHome, write.file) })) }));
     const result = spawnSync(executable, ['--replay'], { input: JSON.stringify({ home: rustHome, ops }), encoding: 'utf8', windowsHide: true, timeout: 30000, maxBuffer: 16 * 1024 * 1024 });
     assert.equal(result.status, 0, result.stderr || result.error?.message);
+    for (const [file, mtimeMs] of modified) {
+      assert.equal((await fs.stat(path.join(rustHome, file))).mtimeMs, mtimeMs, 'replay must apply the fixture modification time');
+    }
     const actual = JSON.parse(result.stdout);
     assert.equal(actual.length, expected.length);
     for (let i = 0; i < actual.length; i++) {
       for (const key of ['speed', 'turnSpeed']) {
         if (expected[i][key] === null) assert.equal(actual[i][key], null);
-        else assert.ok(Math.abs(actual[i][key] - expected[i][key]) <= 1e-9 * Math.max(1, Math.abs(expected[i][key])), name + ' snapshot ' + i + ' ' + key);
+        else assert.ok(Math.abs(actual[i][key] - expected[i][key]) <= 1e-9 * Math.max(1, Math.abs(expected[i][key])), name + ' snapshot ' + i + ' ' + key + ': actual=' + actual[i][key] + ', expected=' + expected[i][key]);
         delete actual[i][key]; delete expected[i][key];
       }
       assert.deepEqual(actual[i], expected[i], name + ' snapshot ' + i);
