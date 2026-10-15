@@ -11,7 +11,7 @@ try {
   const result = spawnSync(path.resolve(__dirname, '../src-tauri/target/release/codex-speed-pet.exe'), ['--ui-test', temporary], { windowsHide: true, encoding: 'utf8', timeout: 60000, env: { ...process.env, CODEX_HOME: path.join(temporary, 'codex') } });
   const reportFile = path.join(temporary, 'report.json');
   const report = fs.existsSync(reportFile) ? JSON.parse(fs.readFileSync(reportFile, 'utf8')) : null;
-  assert.equal(result.status, 0, report ? JSON.stringify(report) : result.error?.message || result.stderr || 'No UI report');
+  assert.equal(result.status, 0, JSON.stringify({ report, error: result.error?.message, stderr: result.stderr, signal: result.signal }));
   assert.equal(report?.passed, true, JSON.stringify(report));
   assert.equal(report.settings.historyResetAt, 12345);
   assert.equal(report.usage.total, 140);

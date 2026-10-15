@@ -197,6 +197,9 @@ fn update_settings(app: AppHandle, patch: Value) -> Result<Settings, String> {
 fn test_report(app: AppHandle, result: Value) -> Result<(), String> {
     let root = settings::test_dir().ok_or("Test reporting is disabled")?;
     std::fs::write(root.join("report.json"), result.to_string()).map_err(|e| e.to_string())?;
+    app.state::<AppState>()
+        .quitting
+        .store(true, Ordering::Relaxed);
     app.exit(if result["passed"] == true { 0 } else { 1 });
     Ok(())
 }
