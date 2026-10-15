@@ -1,12 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import type { AppInfo, AppSettings, QuotaWindow, UpdateStatus, UsageSnapshot } from "./env";
+import TiboPrediction, { EMPTY_TIBO } from "./TiboPrediction";
 
 const EMPTY: UsageSnapshot = {
   day: null, input: 0, output: 0, total: 0, historyTotal: 0, rateLimits: null, speed: 0, turnSpeed: null, turnTokens: null, turnSeconds: null,
   active: false, running: false, lastEvent: null, eventCount: 0, source: "waiting", error: null
 };
-const DEFAULT_SETTINGS: AppSettings = { alwaysOnTop: true, reducedMotion: false, launchAtLogin: false, size: "medium", autoHideChrome: true };
+const DEFAULT_SETTINGS: AppSettings = { alwaysOnTop: true, edgeDock: false, reducedMotion: false, launchAtLogin: false, size: "medium", autoHideChrome: true };
 const SIZE_SCALE = { small: 0.55, medium: 0.82, large: 1.05 };
 
 function shortCount(value: number) {
@@ -114,6 +115,7 @@ const DEFAULT_APP_INFO: AppInfo = { version: "", buildKind: "dev", updateEnabled
 
 export default function App() {
   const [usage, setUsage] = useState<UsageSnapshot>(EMPTY);
+  const [tibo, setTibo] = useState(EMPTY_TIBO);
   const [settings, setSettings] = useState<AppSettings>(() => ({ ...DEFAULT_SETTINGS, ...devSettingsOverride() }));
   const [panel, setPanel] = useState<"none" | "details" | "settings">("none");
   const [clock, setClock] = useState(Date.now());
@@ -128,14 +130,15 @@ export default function App() {
   useEffect(() => {
     let mounted = true;
     const offUsage = window.speedPet?.onUsage(setUsage);
+    const offTibo = window.speedPet?.onTibo?.(setTibo);
     const offSettings = window.speedPet?.onSettings(setSettings);
     const offUpdate = window.speedPet?.onUpdateStatus(setUpdateStatus);
     const offOpenSettings = window.speedPet?.onOpenSettings(() => setPanel("settings"));
     window.speedPet?.getInitial().then((initial) => {
-      if (mounted) { setUsage(initial.usage); setSettings(initial.settings); setAppInfo(initial.appInfo); setUpdateStatus(initial.updateStatus); }
+      if (mounted) { setUsage(initial.usage); setSettings(initial.settings); setAppInfo(initial.appInfo); setUpdateStatus(initial.updateStatus); setTibo(initial.tibo ?? EMPTY_TIBO); }
     }).catch(console.error);
     const timer = setInterval(() => setClock(Date.now()), 1000);
-    return () => { mounted = false; offUsage?.(); offSettings?.(); offUpdate?.(); offOpenSettings?.(); clearInterval(timer); };
+    return () => { mounted = false; offUsage?.(); offTibo?.(); offSettings?.(); offUpdate?.(); offOpenSettings?.(); clearInterval(timer); };
   }, []);
 
   // While a panel is open the main process enlarges the window (small -> medium)
@@ -146,14 +149,14 @@ export default function App() {
   // Keep the dial and speed/totals card visible; fold the header and quotas.
   // Hover and open panels keep the window expanded for as long as needed.
   useEffect(() => {
-    if (!settings.autoHideChrome || hovered || panel !== "none") {
+    if (settings.edgeDock || !settings.autoHideChrome || hovered || panel !== "none") {
       setExpanded(true);
       return;
     }
     const timer = setTimeout(() => setExpanded(false), hasHovered.current ? 1600 : 4000);
     return () => clearTimeout(timer);
-  }, [settings.autoHideChrome, hovered, panel]);
-  const collapsed = settings.autoHideChrome && !expanded && panel === "none";
+  }, [settings.edgeDock, settings.autoHideChrome, hovered, panel]);
+  const collapsed = !settings.edgeDock && settings.autoHideChrome && !expanded && panel === "none";
 
   const active = usage.source !== "error" && usage.active && usage.lastEvent !== null && clock - usage.lastEvent <= 12000;
   // The main process already smooths (EMA) and zeroes the speed; no extra cutoff here.
@@ -162,6 +165,8 @@ export default function App() {
   const status = usage.source === "error" ? "读取失败" : usage.source === "waiting" ? "等待 Codex" : running ? "正在工作" : active ? "正在更新" : "待机中";
   const speedLabel = speed >= 10 ? speed.toFixed(0) : speed.toFixed(1);
   const update = (patch: Partial<AppSettings>) => {
+    if (patch.edgeDock) patch = { ...patch, alwaysOnTop: false };
+    else if (patch.alwaysOnTop) patch = { ...patch, edgeDock: false };
     setSettings((current) => ({ ...current, ...patch }));
     window.speedPet?.updateSettings(patch).then(setSettings).catch((error) => {
       console.error(error);
@@ -234,6 +239,7 @@ export default function App() {
       </span></div>
       <QuotaRow label="5 小时" quota={usage.rateLimits?.fiveHour ?? null} now={clock} />
       <QuotaRow label="一周" quota={usage.rateLimits?.weekly ?? null} now={clock} />
+      <TiboPrediction snapshot={tibo} now={clock} />
     </section>
     </div>
 
@@ -260,8 +266,9 @@ export default function App() {
           <button type="button" aria-pressed={settings.size === "large"} onClick={() => update({ size: "large" })}>大</button>
         </div></div>
         <Toggle label="始终置顶" checked={settings.alwaysOnTop} onChange={(alwaysOnTop) => update({ alwaysOnTop })} />
+        <Toggle label="贴边吸附隐藏" checked={!!settings.edgeDock} onChange={(edgeDock) => update({ edgeDock })} />
         <Toggle label="减少动画" checked={settings.reducedMotion} onChange={(reducedMotion) => update({ reducedMotion })} />
-        <Toggle label="自动折叠窗口" checked={settings.autoHideChrome} onChange={(autoHideChrome) => update({ autoHideChrome })} />
+        <Toggle label="自动折叠窗口" checked={!settings.edgeDock && settings.autoHideChrome} onChange={(autoHideChrome) => update({ autoHideChrome })} disabled={settings.edgeDock} />
         <div className="settings-section">系统</div>
         {appInfo.updateEnabled && <div className="update-row">
           <div className="update-info"><span>GitHub 更新</span><small className={updateStatus.state === "error" ? "update-error" : updateStatus.state === "available" ? "update-highlight" : ""}>{updateLabel}</small></div>
@@ -276,7 +283,7 @@ export default function App() {
           {confirmHistoryReset && <button type="button" className="mini-button" onClick={() => setConfirmHistoryReset(false)}>取消</button>}
           <button type="button" className="mini-button" onClick={resetHistory} disabled={!window.speedPet}>{confirmHistoryReset ? "确认重置" : "重置"}</button>
         </div>
-        <p className="panel-note settings-note">拖动顶部移动。平时保留仪表盘、速度与累计，鼠标移入展开标题和额度。设置和详情打开时保持展开。</p>
+        <p className="panel-note settings-note">{settings.edgeDock ? "拖到屏幕边缘自动吸附，移开鼠标后隐藏，移到窄边完整展开。拖离边缘可取消吸附。吸附与置顶互斥，此模式始终显示完整内容。" : "拖动顶部移动。平时保留仪表盘、速度与累计，鼠标移入展开标题和额度。开启贴边吸附会关闭置顶，并始终显示完整内容。"}</p>
         <button type="button" className="quit-button" onClick={() => window.speedPet?.quit()}>退出应用</button>
       </>}
       </div>

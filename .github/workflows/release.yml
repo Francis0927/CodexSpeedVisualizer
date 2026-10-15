@@ -26,6 +26,10 @@ jobs:
     if: github.repository == 'Francis0927/CodexSpeedVisualizer'
     runs-on: windows-2022
     timeout-minutes: 45
+    env:
+      RUSTUP_TOOLCHAIN: '1.99.0'
+      # Tests and the isolated source build share compiled dependencies.
+      CARGO_TARGET_DIR: ${{ github.workspace }}\src-tauri\target
     defaults:
       run:
         shell: pwsh
@@ -38,9 +42,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: npm
 
       - name: Install locked Rust toolchain
         run: rustup toolchain install 1.99.0 --profile minimal --target x86_64-pc-windows-msvc
+
+      - name: Cache Rust dependencies and build outputs
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          shared-key: windows-2022-msvc
+          cache-bin: false
+          cache-on-failure: true
 
       - name: Install locked dependencies
         run: npm ci

@@ -1,12 +1,12 @@
 use crate::{
-    native,
+    docking, native, tibo,
     settings::{self, Settings},
     update::{self, Updater},
     usage::{self, Collector, Snapshot},
 };
 use serde_json::{json, Value};
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     Mutex,
 };
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
@@ -21,6 +21,9 @@ pub struct AppState {
     pub collector: Mutex<Collector>,
     pub snapshot: Mutex<Snapshot>,
     pub updater: Updater,
+    pub tibo: Mutex<tibo::Snapshot>,
+    docking: Mutex<docking::Docking>,
+    dock_revision: AtomicU64,
     panel: AtomicBool,
     stop: AtomicBool,
     quitting: AtomicBool,
@@ -36,6 +39,7 @@ fn payload(state: &AppState) -> Settings {
         .payload(state.panel.load(Ordering::Relaxed))
 }
 fn show(app: &AppHandle) {
+    reveal_dock(app);
     if let Some(w) = window(app) {
         let _ = w.unminimize();
         native::tool_window(&w);
@@ -52,6 +56,14 @@ fn show(app: &AppHandle) {
         let _ = w.set_focus();
     }
     let _ = tray_menu(app);
+}
+fn reveal_dock(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    state.dock_revision.fetch_add(1, Ordering::SeqCst);
+    state.docking.lock().unwrap().reveal(docking::now());
+    if let Some(w) = window(app) {
+        if native::set_clip(&w, None).is_err() { state.docking.lock().unwrap().retry_clip(); }
+    }
 }
 fn hide_window(app: &AppHandle) {
     if let Some(w) = window(app) {
@@ -90,6 +102,7 @@ fn tray_menu(app: &AppHandle) -> tauri::Result<()> {
         settings.size == "small",
         None::<&str>,
     )?;
+    let dock = CheckMenuItem::with_id(app, "dock", "贴边吸附隐藏", true, settings.edge_dock, None::<&str>)?;
     let medium = CheckMenuItem::with_id(
         app,
         "medium",
@@ -119,8 +132,8 @@ fn tray_menu(app: &AppHandle) -> tauri::Result<()> {
         app,
         "fold",
         "自动折叠窗口",
-        true,
-        settings.auto_hide_chrome,
+        !settings.edge_dock,
+        !settings.edge_dock && settings.auto_hide_chrome,
         None::<&str>,
     )?;
     let login = CheckMenuItem::with_id(
@@ -137,7 +150,7 @@ fn tray_menu(app: &AppHandle) -> tauri::Result<()> {
     let menu = Menu::with_items(
         app,
         &[
-            &toggle, &top, &sizes, &motion, &fold, &login, &check, &sep, &exit,
+            &toggle, &top, &dock, &sizes, &motion, &fold, &login, &check, &sep, &exit,
         ],
     )?;
     if let Some(tray) = app.tray_by_id("dashboard") {
@@ -181,13 +194,20 @@ fn patch_settings(app: &AppHandle, patch: Value) -> Result<Settings, String> {
             native::raise(&w, next.always_on_top);
         }
     }
+    if old.edge_dock != next.edge_dock {
+        state.dock_revision.fetch_add(1, Ordering::SeqCst);
+        state.docking.lock().unwrap().reset();
+        if let Some(w) = window(app) {
+            if native::set_clip(&w, None).is_err() { state.docking.lock().unwrap().retry_clip(); }
+        }
+    }
     broadcast(app);
     Ok(payload(&state))
 }
 
 #[tauri::command]
 fn get_initial(state: State<AppState>) -> Value {
-    json!({"usage":state.snapshot.lock().unwrap().clone(),"settings":payload(&state),"appInfo":{"version":env!("CARGO_PKG_VERSION"),"buildKind":update::build_kind(),"updateEnabled":update::enabled()},"updateStatus":state.updater.status()})
+    json!({"usage":state.snapshot.lock().unwrap().clone(),"settings":payload(&state),"appInfo":{"version":env!("CARGO_PKG_VERSION"),"buildKind":update::build_kind(),"updateEnabled":update::enabled()},"updateStatus":state.updater.status(),"tibo":state.tibo.lock().unwrap().clone()})
 }
 #[tauri::command]
 fn update_settings(app: AppHandle, patch: Value) -> Result<Settings, String> {
@@ -233,6 +253,7 @@ async fn reset_history(app: AppHandle) -> Result<Snapshot, String> {
 fn set_panel_open(app: AppHandle, open: bool) {
     let state = app.state::<AppState>();
     if state.panel.swap(open, Ordering::Relaxed) != open {
+        if open { reveal_dock(&app); }
         broadcast(&app);
     }
 }
@@ -294,6 +315,18 @@ fn quit(app: AppHandle) {
     app.exit(0);
 }
 #[tauri::command]
+fn test_tibo_status(app: AppHandle, snapshot: tibo::Snapshot) -> Result<(), String> {
+    settings::test_dir().ok_or("Test controls are disabled")?;
+    *app.state::<AppState>().tibo.lock().unwrap() = snapshot.clone();
+    app.emit("tibo:update", snapshot).map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn test_window_state(app: AppHandle) -> Result<Value, String> {
+    settings::test_dir().ok_or("Test controls are disabled")?;
+    let w = window(&app).ok_or("Missing test window")?;
+    Ok(json!({"topmost":native::styles(&w).0}))
+}
+#[tauri::command]
 async fn check_update(app: AppHandle) -> Result<update::Status, String> {
     tauri::async_runtime::spawn_blocking(move || app.state::<AppState>().updater.check(&app))
         .await
@@ -329,7 +362,9 @@ pub fn run() {
             check_update,
             install_update,
             test_report,
-            test_update_status
+            test_update_status,
+            test_tibo_status,
+            test_window_state
         ])
         .setup(|app| {
             let settings = settings::load();
@@ -344,6 +379,9 @@ pub fn run() {
                 collector: Mutex::new(collector),
                 snapshot: Mutex::new(snapshot),
                 updater: Updater::new(),
+                tibo: Mutex::new(tibo::Snapshot::default()),
+                docking: Mutex::new(docking::Docking::default()),
+                dock_revision: AtomicU64::new(0),
                 panel: AtomicBool::new(false),
                 stop: AtomicBool::new(false),
                 quitting: AtomicBool::new(false),
@@ -440,6 +478,7 @@ pub fn run() {
                             return;
                         }
                         "top" => json!({"alwaysOnTop":!s.always_on_top}),
+                        "dock" => json!({"edgeDock":!s.edge_dock}),
                         "motion" => json!({"reducedMotion":!s.reduced_motion}),
                         "fold" => json!({"autoHideChrome":!s.auto_hide_chrome}),
                         "login" => json!({"launchAtLogin":!s.launch_at_login}),
@@ -529,6 +568,70 @@ pub fn run() {
                     std::time::Duration::from_secs(2).saturating_sub(started.elapsed()),
                 );
             });
+            // Hover detection also works when the visible strip is covered by
+            // another normal window. Native reveal never activates the app.
+            let handle = app.handle().clone();
+            std::thread::spawn(move || loop {
+                let state = handle.state::<AppState>();
+                if state.stop.load(Ordering::Relaxed) { break; }
+                if let Some(w) = window(&handle) {
+                    let enabled = state.settings.lock().unwrap().edge_dock;
+                    let needs_update = state.docking.lock().unwrap().needs_update();
+                    if (enabled || needs_update) && w.is_visible().unwrap_or(false) && !w.is_minimized().unwrap_or(false) {
+                        if let (Ok(position), Ok(size), Ok(Some(monitor))) = (w.outer_position(), w.outer_size(), w.current_monitor()) {
+                            let area = monitor.work_area();
+                            let revision = state.dock_revision.load(Ordering::SeqCst);
+                            let cursor = w.cursor_position().ok().map(|p| (p.x.floor() as i32, p.y.floor() as i32));
+                            let frame = docking::Frame {
+                                enabled,
+                                rect: docking::Rect { x: position.x, y: position.y, width: size.width as i32, height: size.height as i32 },
+                                area: docking::Rect { x: area.position.x, y: area.position.y, width: area.size.width as i32, height: area.size.height as i32 },
+                                scale: monitor.scale_factor(),
+                                cursor,
+                                pointer_on_window: cursor.is_some_and(|p| native::pointer_on_window(&w, p)),
+                                mouse_down: native::mouse_down(),
+                                panel_open: state.panel.load(Ordering::Relaxed),
+                                now: docking::now(),
+                            };
+                            let plan = state.docking.lock().unwrap().update(frame);
+                            if revision != state.dock_revision.load(Ordering::SeqCst) { continue; }
+                            // Never hold state locks across calls dispatched to
+                            // the UI thread (settings commands run there too).
+                            if let Some((x, y)) = plan.position { let _ = w.set_position(PhysicalPosition::new(x, y)); }
+                            let still_enabled = state.settings.lock().unwrap().edge_dock;
+                            if still_enabled && native::styles(&w).0 { native::raise(&w, false); }
+                            if plan.raise { native::raise_normal(&w, cursor); }
+                            if let Some(clip) = plan.clip {
+                                if native::set_clip(&w, clip).is_err() { state.docking.lock().unwrap().retry_clip(); }
+                            }
+                            // A simultaneous tray/settings action wins over a
+                            // stale hide plan, even if it arrived during IPC.
+                            if revision != state.dock_revision.load(Ordering::SeqCst) {
+                                let _ = native::set_clip(&w, None);
+                                state.docking.lock().unwrap().retry_clip();
+                            }
+                        }
+                    }
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            });
+            // Native polling continues while the WebView is hidden or folded.
+            // Keep network waits off the usage and window-maintenance threads.
+            if settings::test_dir().is_none() {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    let mut tracker = tibo::Tracker::new();
+                    loop {
+                        let state = handle.state::<AppState>();
+                        if state.stop.load(Ordering::Relaxed) { break; }
+                        if tracker.poll() {
+                            *state.tibo.lock().unwrap() = tracker.snapshot.clone();
+                            let _ = handle.emit("tibo:update", &tracker.snapshot);
+                        }
+                        std::thread::sleep(std::time::Duration::from_secs(1));
+                    }
+                });
+            }
             // Window maintenance and update timers must not wait for a cold
             // history scan or a large appended session file.
             let handle = app.handle().clone();
@@ -601,6 +704,51 @@ pub fn run() {
 
 // An isolated real Windows regression executable mode: no settings, session
 // collection, startup registration or GitHub requests are initialized.
+#[cfg(windows)]
+fn verify_dock_window(w: &WebviewWindow) {
+    use docking::{Docking, Frame, Rect};
+    let monitor = w.current_monitor().unwrap().unwrap();
+    let area = monitor.work_area();
+    let area = Rect { x: area.position.x, y: area.position.y, width: area.size.width as i32, height: area.size.height as i32 };
+    let size = w.outer_size().unwrap();
+    let width = size.width as i32;
+    let height = size.height as i32;
+    let middle_x = area.x + (area.width - width) / 2;
+    let middle_y = area.y + (area.height - height) / 2;
+    for (x, y) in [(area.x, middle_y), (area.x + area.width - width, middle_y), (middle_x, area.y), (middle_x, area.y + area.height - height)] {
+        w.set_position(PhysicalPosition::new(x, y)).unwrap();
+        let rect = Rect { x, y, width, height };
+        let frame = |now, cursor, panel_open| Frame { enabled: true, rect, area, scale: monitor.scale_factor(), cursor, pointer_on_window: true, mouse_down: false, panel_open, now };
+        let outside = Some((area.x - 1000, area.y - 1000));
+        let mut dock = Docking::default();
+        dock.update(frame(200, outside, false));
+        let hidden = dock.update(frame(1000, outside, false));
+        let clip = hidden.clip.unwrap().unwrap();
+        native::set_clip(w, Some(clip)).unwrap();
+        assert_eq!(native::clip_bounds(w), Some(clip), "native region must contain only the edge strip");
+        assert_eq!(w.outer_size().unwrap(), size, "hiding preserves content dimensions");
+        let open_panel = dock.update(frame(1100, outside, true));
+        native::set_clip(w, open_panel.clip.unwrap()).unwrap();
+        assert_eq!(native::clip_bounds(w), None, "panels restore the entire native region");
+        dock.update(frame(1200, outside, false));
+        native::set_clip(w, dock.update(frame(2100, outside, false)).clip.unwrap()).unwrap();
+        let point = Some((x + clip.x + clip.width / 2, y + clip.y + clip.height / 2));
+        let reveal = dock.update(frame(2200, point, false));
+        assert!(reveal.raise);
+        native::raise_normal(w, point);
+        native::set_clip(w, reveal.clip.unwrap()).unwrap();
+        assert_eq!(native::clip_bounds(w), None);
+        assert!(!native::styles(w).0, "hover reveal must not enable topmost");
+        assert!(!native::foreground(w), "hover reveal must not take keyboard focus");
+        dock.update(frame(2300, outside, false));
+        native::set_clip(w, dock.update(frame(3200, outside, false)).clip.unwrap()).unwrap();
+        let mut disabled = frame(3300, outside, false);
+        disabled.enabled = false;
+        native::set_clip(w, dock.update(disabled).clip.unwrap()).unwrap();
+        assert_eq!(native::clip_bounds(w), None, "disabling removes the native mask");
+    }
+}
+
 pub fn window_test(report: std::path::PathBuf) {
     let application=tauri::Builder::default().setup(move|app|{
         let pet=WebviewWindowBuilder::new(app,"test-dashboard",WebviewUrl::External("about:blank".parse().unwrap())).inner_size(180.0,120.0).position(30.0,30.0).decorations(false).transparent(true).shadow(false).skip_taskbar(true).focused(false).always_on_top(true).data_directory(report.parent().unwrap().join("webview2")).build()?;
@@ -624,10 +772,84 @@ pub fn window_test(report: std::path::PathBuf) {
                 pet.hide().unwrap();native::maintain(&pet,true);assert!(!pet.is_visible().unwrap());assert!(!native::styles(&pet).0);
                 pet.show().unwrap();native::raise(&pet,true);native::tool_window(&pet);pet.minimize().unwrap();pet.unminimize().unwrap();native::tool_window(&pet);
                 assert_eq!(native::styles(&pet),(true,true,false));
+                #[cfg(windows)]
+                { blocker.set_focus().unwrap(); sleep(Duration::from_millis(100)); native::raise(&pet,false); verify_dock_window(&pet); verify_covered_dock(&pet, output.parent().unwrap()); }
             }));
-            let ok=outcome.is_ok();let _=std::fs::write(&output,json!({"passed":ok,"checks":["native topmost","tool window","screenshot overlay order","foreground focus","move and resize","lost flag repair","disabled maintenance","hide restore"]}).to_string());
+            let ok=outcome.is_ok();let _=std::fs::write(&output,json!({"passed":ok,"checks":["native topmost","tool window","screenshot overlay order","foreground focus","move and resize","lost flag repair","disabled maintenance","hide restore","four-edge native clipping","hover reveal without focus or topmost","panel and dock disable restore","separate-process cover before and after hide"]}).to_string());
             handle.exit(if ok{0}else{1});
         });Ok(())
     }).build(tauri::generate_context!()).expect("native regression application");
     application.run(|_, _| {});
+}
+
+#[cfg(windows)]
+fn verify_covered_dock(w: &WebviewWindow, root: &std::path::Path) {
+    use docking::{Docking, Frame, Rect};
+    use std::{os::windows::process::CommandExt, time::{Duration, Instant}};
+    use windows::Win32::{Foundation::HWND, UI::WindowsAndMessaging::*};
+    struct Cover(std::process::Child);
+    impl Drop for Cover {
+        fn drop(&mut self) { let _ = self.0.kill(); let _ = self.0.wait(); }
+    }
+    let monitor = w.current_monitor().unwrap().unwrap();
+    let area = monitor.work_area();
+    let area = Rect { x: area.position.x, y: area.position.y, width: area.size.width as i32, height: area.size.height as i32 };
+    let size = w.outer_size().unwrap();
+    let width = size.width as i32;
+    let height = size.height as i32;
+    let fixture = root.join("cover.json");
+    std::fs::write(&fixture, json!({"x":area.x,"y":area.y,"width":width,"height":height}).to_string()).unwrap();
+    let child = std::process::Command::new(std::env::current_exe().unwrap()).arg("--test-cover").arg(&fixture).creation_flags(0x08000000).spawn().unwrap();
+    unsafe { let _ = AllowSetForegroundWindow(child.id()); }
+    let _cover = Cover(child);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let handle = loop {
+        if let Some(handle) = std::fs::read(&fixture).ok().and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok()).and_then(|v| v["handle"].as_i64()) {
+            if unsafe { GetForegroundWindow().0 as isize } == handle as isize { break handle as isize; }
+        }
+        assert!(Instant::now() < deadline, "cover helper must become the foreground app");
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    let positions = [(area.x, area.y + 100), (area.x + area.width - width, area.y + 100), (area.x + 100, area.y), (area.x + 100, area.y + area.height - height)];
+    for (index, (x, y)) in positions.into_iter().enumerate() {
+        w.set_position(PhysicalPosition::new(x, y)).unwrap();
+        let rect = Rect { x, y, width, height };
+        let point = match index { 0 => (x + 2, y + height / 2), 1 => (x + width - 2, y + height / 2), 2 => (x + width / 2, y + 2), _ => (x + width / 2, y + height - 2) };
+        let frame = |now, cursor| Frame { enabled: true, rect, area, scale: monitor.scale_factor(), cursor, pointer_on_window: cursor.is_some_and(|p| native::pointer_on_window(w, p)), mouse_down: false, panel_open: false, now };
+        let cover = || unsafe { SetWindowPos(HWND(handle as _), Some(HWND_TOP), x, y, width, height, SWP_NOACTIVATE).unwrap(); };
+        cover();
+        assert!(!native::above_handle(w, handle), "other process must cover the dashboard");
+        assert!(!native::pointer_on_window(w, point), "edge point belongs to the covering app");
+        let mut dock = Docking::default();
+        dock.update(frame(200, Some((x + width / 2, y + height / 2))));
+        let reveal = dock.update(frame(300, Some(point)));
+        assert!(reveal.raise, "edge entry raises even before hide finishes");
+        native::raise_normal(w, Some(point));
+        if let Some(clip) = reveal.clip { native::set_clip(w, clip).unwrap(); }
+        assert!(native::above_handle(w, handle), "hover must reveal above a different foreground process");
+        assert_eq!(unsafe { GetForegroundWindow().0 as isize }, handle, "hover cannot steal foreground focus");
+        let outside = Some((area.x - 1000, area.y - 1000));
+        dock.update(frame(400, outside));
+        native::set_clip(w, dock.update(frame(1200, outside)).clip.unwrap()).unwrap();
+        cover();
+        let reveal = dock.update(frame(1300, Some(point)));
+        assert!(reveal.raise);
+        native::raise_normal(w, Some(point));
+        native::set_clip(w, reveal.clip.unwrap()).unwrap();
+        assert!(native::above_handle(w, handle), "hidden dashboard must reveal above the cover");
+        assert_eq!(native::clip_bounds(w), None);
+        assert!(!native::styles(w).0);
+        assert_eq!(unsafe { GetForegroundWindow().0 as isize }, handle);
+        unsafe { SetWindowPos(HWND(handle as _), Some(HWND_TOPMOST), x, y, width, height, SWP_NOACTIVATE).unwrap(); }
+        dock.update(frame(1400, outside));
+        native::set_clip(w, dock.update(frame(2200, outside)).clip.unwrap()).unwrap();
+        let reveal = dock.update(frame(2300, Some(point)));
+        assert!(reveal.raise);
+        native::raise_normal(w, Some(point));
+        native::set_clip(w, reveal.clip.unwrap()).unwrap();
+        assert!(!native::above_handle(w, handle), "topmost overlays keep their order");
+        assert!(!native::styles(w).0);
+        assert_eq!(unsafe { GetForegroundWindow().0 as isize }, handle);
+        unsafe { SetWindowPos(HWND(handle as _), Some(HWND_NOTOPMOST), x, y, width, height, SWP_NOACTIVATE).unwrap(); }
+    }
 }

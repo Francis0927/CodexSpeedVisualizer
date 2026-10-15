@@ -1,4 +1,96 @@
 use tauri::WebviewWindow;
+
+#[cfg(windows)]
+fn on_window_thread<T: Send + 'static>(
+    window: &WebviewWindow,
+    action: impl FnOnce(windows::Win32::Foundation::HWND) -> T + Send + 'static,
+) -> Result<T, String> {
+    let handle = window.hwnd().map_err(|e| e.to_string())?.0 as isize;
+    let (send, receive) = std::sync::mpsc::sync_channel(1);
+    window.run_on_main_thread(move || {
+        let result = action(windows::Win32::Foundation::HWND(handle as _));
+        let _ = send.send(result);
+    }).map_err(|e| e.to_string())?;
+    receive.recv().map_err(|e| e.to_string())
+}
+
+// Clip the native window instead of parking it on an adjacent monitor. Its
+// content size and saved position stay intact, and only the edge strip receives input.
+#[cfg(windows)]
+pub fn set_clip(window: &WebviewWindow, clip: Option<crate::docking::Rect>) -> Result<(), String> {
+    use windows::Win32::Graphics::Gdi::*;
+    on_window_thread(window, move |hwnd| {
+        let region = if let Some(rect) = clip {
+            let region = unsafe { CreateRectRgn(rect.x, rect.y, rect.x + rect.width, rect.y + rect.height) };
+            if region.is_invalid() { return Err("无法创建贴边隐藏区域".into()); }
+            Some(region)
+        } else { None };
+        if unsafe { SetWindowRgn(hwnd, region, true) } == 0 {
+            // On success Windows owns the region; on failure it remains ours.
+            if let Some(region) = region { unsafe { let _ = DeleteObject(region.into()); } }
+            return Err("无法应用贴边隐藏区域".into());
+        }
+        Ok(())
+    })?
+}
+#[cfg(windows)]
+pub fn clip_bounds(window: &WebviewWindow) -> Option<crate::docking::Rect> {
+    on_window_thread(window, |hwnd| {
+        let mut rect = windows::Win32::Foundation::RECT::default();
+        let kind = unsafe { windows::Win32::Graphics::Gdi::GetWindowRgnBox(hwnd, &mut rect) };
+        (kind.0 > 0).then_some(crate::docking::Rect { x: rect.left, y: rect.top, width: rect.right - rect.left, height: rect.bottom - rect.top })
+    }).ok().flatten()
+}
+#[cfg(windows)]
+pub fn mouse_down() -> bool {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
+    unsafe { GetAsyncKeyState(VK_LBUTTON.0 as i32) < 0 }
+}
+#[cfg(windows)]
+pub fn pointer_on_window(window: &WebviewWindow, point: (i32, i32)) -> bool {
+    use windows::Win32::{Foundation::POINT, UI::WindowsAndMessaging::{GetAncestor, WindowFromPoint, GA_ROOT}};
+    let Ok(hwnd) = window.hwnd() else { return false; };
+    unsafe {
+        GetAncestor(WindowFromPoint(POINT { x: point.0, y: point.1 }), GA_ROOT).0 == hwnd.0
+    }
+}
+#[cfg(windows)]
+pub fn raise_normal(window: &WebviewWindow, point: Option<(i32, i32)>) {
+    use windows::Win32::UI::WindowsAndMessaging::*;
+    let _ = on_window_thread(window, move |hwnd| {
+        unsafe {
+            let flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER;
+            let foreground = GetForegroundWindow();
+            let overlay_at_edge = point.is_some_and(|(x, y)| {
+                let cover = GetAncestor(WindowFromPoint(windows::Win32::Foundation::POINT { x, y }), GA_ROOT);
+                cover != hwnd && GetWindowLongPtrW(cover, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST.0 != 0
+            });
+            let _ = SetWindowPos(hwnd, Some(HWND_TOP), 0, 0, 0, 0,
+                flags);
+            // Windows can reject HWND_TOP from a background process. A pair of
+            // non-activating calls in the same UI task raises the normal window
+            // without leaving it topmost or taking the other app's focus.
+            // Never use this promotion against a topmost edge overlay.
+            if !overlay_at_edge && !foreground.is_invalid() && foreground != hwnd
+                && GetWindowLongPtrW(foreground, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST.0 == 0
+                && !above_hwnd(hwnd, foreground)
+            {
+                let _ = SetWindowPos(hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0, flags);
+                let _ = SetWindowPos(hwnd, Some(HWND_NOTOPMOST), 0, 0, 0, 0, flags);
+            }
+        }
+    });
+}
+#[cfg(not(windows))]
+pub fn set_clip(_: &WebviewWindow, clip: Option<crate::docking::Rect>) -> Result<(), String> {
+    if clip.is_some() { Err("贴边隐藏仅支持 Windows".into()) } else { Ok(()) }
+}
+#[cfg(not(windows))]
+pub fn mouse_down() -> bool { false }
+#[cfg(not(windows))]
+pub fn pointer_on_window(_: &WebviewWindow, _: (i32, i32)) -> bool { true }
+#[cfg(not(windows))]
+pub fn raise_normal(_: &WebviewWindow, _: Option<(i32, i32)>) {}
 #[cfg(windows)]
 pub fn styles(window: &WebviewWindow) -> (bool, bool, bool) {
     use windows::Win32::UI::WindowsAndMessaging::*;
@@ -70,18 +162,25 @@ pub fn maintain(window: &WebviewWindow, enabled: bool) {
 }
 #[cfg(windows)]
 pub fn above(window: &WebviewWindow, other: &WebviewWindow) -> bool {
+    above_handle(window, other.hwnd().unwrap().0 as isize)
+}
+#[cfg(windows)]
+pub fn above_handle(window: &WebviewWindow, other: isize) -> bool {
+    above_hwnd(windows::Win32::Foundation::HWND(window.hwnd().unwrap().0), windows::Win32::Foundation::HWND(other as _))
+}
+#[cfg(windows)]
+fn above_hwnd(own: windows::Win32::Foundation::HWND, other: windows::Win32::Foundation::HWND) -> bool {
     use windows::Win32::UI::WindowsAndMessaging::*;
-    let own = window.hwnd().unwrap().0;
     let mut cursor = unsafe {
         GetWindow(
-            windows::Win32::Foundation::HWND(other.hwnd().unwrap().0),
+            other,
             GW_HWNDPREV,
         )
         .ok()
     };
     for _ in 0..10000 {
         match cursor {
-            Some(handle) if handle.0 == own => return true,
+            Some(handle) if handle == own => return true,
             Some(handle) if !handle.is_invalid() => {
                 cursor = unsafe { GetWindow(handle, GW_HWNDPREV).ok() }
             }
@@ -89,6 +188,33 @@ pub fn above(window: &WebviewWindow, other: &WebviewWindow) -> bool {
         }
     }
     false
+}
+
+// A separate-process ordinary window for the isolated occlusion regression.
+// This mode never initializes application settings, usage collection or updates.
+#[cfg(windows)]
+pub fn cover_test(fixture: std::path::PathBuf) {
+    use windows::{core::w, Win32::UI::WindowsAndMessaging::*};
+    let value: serde_json::Value = serde_json::from_slice(&std::fs::read(&fixture).unwrap()).unwrap();
+    unsafe {
+        let window = CreateWindowExW(WS_EX_TOOLWINDOW, w!("STATIC"), w!("Codex dock regression cover"), WS_POPUP | WS_VISIBLE,
+            value["x"].as_i64().unwrap() as i32, value["y"].as_i64().unwrap() as i32,
+            value["width"].as_i64().unwrap() as i32, value["height"].as_i64().unwrap() as i32,
+            None, None, None, None).unwrap();
+        std::fs::write(&fixture, serde_json::json!({"handle":window.0 as isize}).to_string()).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(25);
+        let mut message = MSG::default();
+        let mut activated = false;
+        while IsWindow(Some(window)).as_bool() && std::time::Instant::now() < deadline {
+            if !activated { activated = SetForegroundWindow(window).as_bool(); }
+            while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
+                let _ = TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let _ = DestroyWindow(window);
+    }
 }
 #[cfg(windows)]
 pub fn foreground(window: &WebviewWindow) -> bool {

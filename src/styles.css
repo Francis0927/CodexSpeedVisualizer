@@ -59,6 +59,12 @@ button { font: inherit; }
 .quota-reset { line-height: 1.5; font-size: calc(12px * var(--text-scale)); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .quota-reset { color: #c5e2d7; }
 
+.tibo-prediction { margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(192, 250, 216, .16); overflow-wrap: anywhere; line-height: 1.5; }
+.tibo-title { color: #d4ebe3; font-size: calc(13px * var(--text-scale)); font-weight: 700; }
+.tibo-status { display: block; margin: 4px 0; color: #bcff9b; font-size: calc(14px * var(--text-scale)); }
+.tibo-detail { color: #c5e2d7; font-size: calc(11px * var(--text-scale)); }
+.tibo-error { color: #ffc28b; font-size: calc(11px * var(--text-scale)); }
+
 /* ---------- Panels (settings / details) ---------- */
 .overlay { position: absolute; z-index: 5; inset: 46px 10px 10px; display: flex; flex-direction: column; overflow: hidden; border-radius: 19px; border: 1px solid rgba(169, 255, 198, .3); background: linear-gradient(160deg, #1a4d54, #102b3b); box-shadow: 0 8px 28px rgba(0, 18, 26, .48); font-size: 12px; }
 .panel-body { flex: 1; min-height: 0; overflow-y: auto; padding: 0 15px 13px; }
@@ -109,6 +115,8 @@ button { font: inherit; }
 .shell.view-small .gauge-wrap { height: 150px; }
 .shell.view-small .gauge-art { width: 195px; height: 155px; }
 .shell.view-small .today-line small, .shell.view-small .history-line small { display: none; }
+.shell.view-small .history-line { gap: 2px; font-size: calc(11px * var(--text-scale)); white-space: nowrap; }
+.shell.view-small .history-line strong { font-size: calc(13px * var(--text-scale)); }
 .shell.view-small .speed-number { min-height: 54px; }
 .shell.view-small .speed-number strong { font-size: 54px; }
 .shell.view-small .speed-number span { font-size: 17px; }

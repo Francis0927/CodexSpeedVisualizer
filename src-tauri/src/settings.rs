@@ -11,6 +11,7 @@ pub struct Position {
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
     pub always_on_top: bool,
+    pub edge_dock: bool,
     pub reduced_motion: bool,
     pub launch_at_login: bool,
     pub size: String,
@@ -25,6 +26,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             always_on_top: true,
+            edge_dock: false,
             reduced_motion: false,
             launch_at_login: false,
             size: "medium".into(),
@@ -79,6 +81,7 @@ pub fn load() -> Settings {
         settings.size = "medium".into();
     }
     settings.history_reset_at = settings.history_reset_at.max(0);
+    settings.normalize_modes();
     if settings
         .position
         .as_ref()
@@ -102,6 +105,9 @@ pub fn save(settings: &Settings) -> Result<(), String> {
     Ok(())
 }
 impl Settings {
+    fn normalize_modes(&mut self) {
+        if self.edge_dock { self.always_on_top = false; }
+    }
     pub fn payload(&self, panel: bool) -> Self {
         let mut s = self.clone();
         s.view_size = Some(if panel && self.size == "small" {
@@ -114,6 +120,7 @@ impl Settings {
     pub fn patch(&mut self, patch: &Value) {
         for (key, target) in [
             ("alwaysOnTop", &mut self.always_on_top),
+            ("edgeDock", &mut self.edge_dock),
             ("reducedMotion", &mut self.reduced_motion),
             ("launchAtLogin", &mut self.launch_at_login),
             ("autoHideChrome", &mut self.auto_hide_chrome),
@@ -122,12 +129,33 @@ impl Settings {
                 *target = v;
             }
         }
+        if patch["alwaysOnTop"] == true && patch["edgeDock"] != true {
+            self.edge_dock = false;
+        }
+        self.normalize_modes();
         if let Some(size) = patch["size"]
             .as_str()
             .filter(|s| ["small", "medium", "large"].contains(s))
         {
             self.size = size.to_string();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn dock_and_topmost_are_mutually_exclusive_and_legacy_settings_default_off() {
+        let mut settings: Settings = serde_json::from_value(serde_json::json!({"alwaysOnTop":true})).unwrap();
+        assert!(!settings.edge_dock);
+        settings.patch(&serde_json::json!({"edgeDock":true}));
+        assert!(settings.edge_dock && !settings.always_on_top);
+        assert!(settings.auto_hide_chrome, "keep the normal mode's folding preference");
+        settings.patch(&serde_json::json!({"alwaysOnTop":true}));
+        assert!(settings.always_on_top && !settings.edge_dock);
+        settings.patch(&serde_json::json!({"alwaysOnTop":true,"edgeDock":true}));
+        assert!(settings.edge_dock && !settings.always_on_top);
     }
 }
 

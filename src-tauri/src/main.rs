@@ -1,12 +1,19 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod desktop;
+mod docking;
 mod native;
 mod settings;
+mod tibo;
 mod update;
 mod usage;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    #[cfg(windows)]
+    if let Some(index) = args.iter().position(|a| a == "--test-cover") {
+        native::cover_test(std::path::PathBuf::from(args.get(index + 1).expect("cover fixture")));
+        return;
+    }
     if let Some(index) = args.iter().position(|a| a == "--test-window") {
         desktop::window_test(std::path::PathBuf::from(
             args.get(index + 1).expect("test report path"),

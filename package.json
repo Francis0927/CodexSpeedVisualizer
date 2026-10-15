@@ -1,6 +1,6 @@
 {
   "name": "codex-speed-pet",
-  "version": "0.6.6",
+  "version": "0.6.7",
   "private": true,
   "description": "A local Codex token speed car dashboard",
   "scripts": {
@@ -19,7 +19,7 @@
     "test:update-window": "npm run test:window",
     "test:topmost": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/rust.ps1 build --locked && node tests/tauri-window.test.cjs",
     "dist:release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-release.ps1",
-    "test:reference": "node --test tests/usage.test.cjs tests/topmost.test.cjs tests/release.test.cjs tests/release-actions.test.cjs tests/prune-local.test.cjs tests/update.test.cjs tests/main.test.cjs"
+    "test:reference": "node --test tests/usage.test.cjs tests/topmost.test.cjs tests/release.test.cjs tests/release-actions.test.cjs tests/prune-local.test.cjs tests/update.test.cjs tests/main.test.cjs tests/tibo.test.cjs"
   },
   "dependencies": {
     "@tauri-apps/api": "2.12.3",

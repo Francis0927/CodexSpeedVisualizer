@@ -1,6 +1,6 @@
 [package]
 name = "codex-speed-pet"
-version = "0.6.6"
+version = "0.6.7"
 edition = "2021"
 rust-version = "1.90"
 
@@ -28,7 +28,7 @@ tempfile = "3"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading", "Win32_System_ProcessStatus"] }
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_Graphics_Gdi", "Win32_System_Threading", "Win32_System_ProcessStatus"] }
 winreg = "0.55"
 
 [profile.release]

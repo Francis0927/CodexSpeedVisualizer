@@ -36,6 +36,7 @@ export type UsageSnapshot = {
 
 export type AppSettings = {
   alwaysOnTop: boolean;
+  edgeDock: boolean;
   reducedMotion: boolean;
   launchAtLogin: boolean;
   size: "small" | "medium" | "large";
@@ -65,10 +66,33 @@ export type AppInfo = {
   updateEnabled: boolean;
 };
 
+export type TiboReset = {
+  reset_type: "regular" | "banked";
+  announced_at: string;
+  text: string;
+};
+export type TiboSnapshot = {
+  data: {
+    latest_reset: TiboReset | null;
+    scheduled_reset: (TiboReset & { scheduled_for: string | null }) | null;
+    active_watch: {
+      level: "elevated" | "strong";
+      reset_chance_percent: number | null;
+      forecast_window: string;
+      observed_at: string;
+      expires_at: string;
+      text: string;
+    } | null;
+  } | null;
+  fetchedAt: number | null;
+  error: string | null;
+};
+
 declare global {
   interface Window {
     speedPet?: {
-      getInitial(): Promise<{ usage: UsageSnapshot; settings: AppSettings; appInfo: AppInfo; updateStatus: UpdateStatus }>;
+      getInitial(): Promise<{ usage: UsageSnapshot; settings: AppSettings; appInfo: AppInfo; updateStatus: UpdateStatus; tibo?: TiboSnapshot }>;
+      onTibo?(callback: (snapshot: TiboSnapshot) => void): () => void;
       updateSettings(patch: Partial<AppSettings>): Promise<AppSettings>;
       resetHistory(): Promise<UsageSnapshot>;
       setPanelOpen(open: boolean): void;

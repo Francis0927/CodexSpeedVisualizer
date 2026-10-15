@@ -29,6 +29,22 @@ async function exportAssets(output, version, assets) {
     if (await hashFile(target) !== asset.sha256) throw Error('Upload copy checksum mismatch');
   }
 }
+async function buildIsolatedApp(stage, version, env, execute = run) {
+  // Resolve before changing cwd: CI points this at the same target used by tests.
+  // Local builds without an override retain their isolated output directory.
+  const targetRoot = env.CARGO_TARGET_DIR
+    ? path.resolve(root, env.CARGO_TARGET_DIR)
+    : path.join(stage, 'src-tauri/target');
+  const buildEnv = { ...env, CARGO_TARGET_DIR: targetRoot };
+  // The renderer is already copied. Only compiler outputs are shared; source
+  // and package inputs still come from the isolated, filtered source tree.
+  execute(process.execPath, [path.join(root, 'node_modules/@tauri-apps/cli/tauri.js'), 'build', '--features', 'custom-protocol', '--config', JSON.stringify({ build: { beforeBuildCommand: '' } })], { cwd: stage, env: buildEnv, timeout: 30 * 60 * 1000, maxBuffer: 8 * 1024 * 1024 });
+  const target = path.join(targetRoot, 'release');
+  // A shared target may also contain installers from earlier versions.
+  const installers = (await fsp.readdir(path.join(target, 'bundle/nsis'))).filter(name => name.endsWith('_' + version + '_x64-setup.exe'));
+  if (installers.length !== 1) throw Error('Expected one NSIS installer for version ' + version);
+  return { target, installerPath: path.join(target, 'bundle/nsis', installers[0]) };
+}
 async function main() {
   const pkg = JSON.parse(await fsp.readFile(path.join(root, 'package.json'), 'utf8'));
   const version = pkg.version;
@@ -68,18 +84,13 @@ async function main() {
       env.CARGO_HOME = cargo; env.RUSTUP_HOME = path.join(root, '.tools/rustup');
       env.PATH = path.join(cargo, 'bin') + ';' + env.PATH;
     }
-    // Empty hook: renderer is already built and copied; the isolated source
-    // does not need node_modules or any machine-specific update configuration.
-    run(process.execPath, [path.join(root, 'node_modules/@tauri-apps/cli/tauri.js'), 'build', '--features', 'custom-protocol', '--config', JSON.stringify({ build: { beforeBuildCommand: '' } })], { cwd: stage, env, timeout: 30 * 60 * 1000, maxBuffer: 8 * 1024 * 1024 });
-    const target = path.join(stage, 'src-tauri/target/release');
-    const installers = (await fsp.readdir(path.join(target, 'bundle/nsis'))).filter(name => name.endsWith('.exe'));
-    if (installers.length !== 1) throw Error('Expected one NSIS installer');
+    const { target, installerPath } = await buildIsolatedApp(stage, version, env);
     await fsp.mkdir(path.join(output, 'app'), { recursive: true });
     await fsp.copyFile(path.join(target, 'Codex Speed Pet.exe'), path.join(output, 'app/Codex Speed Pet.exe'));
     await fsp.writeFile(path.join(output, 'app/build-kind.json'), JSON.stringify({ kind: 'portable', appId: 'dev.codex.speedpet' }));
     const installer = 'Codex-Speed-Pet-Setup-' + version + '.exe';
     const portable = 'Codex-Speed-Pet-portable-' + version + '.zip';
-    await fsp.copyFile(path.join(target, 'bundle/nsis', installers[0]), path.join(output, installer));
+    await fsp.copyFile(installerPath, path.join(output, installer));
     run('powershell.exe', ['-NoProfile', '-Command', 'Compress-Archive -LiteralPath ' + psQuote(path.join(output, 'app/Codex Speed Pet.exe')) + ',' + psQuote(path.join(output, 'app/build-kind.json')) + ' -DestinationPath ' + psQuote(path.join(output, portable))]);
     await verifyRelease(output, version);
     const sums = [];
@@ -94,4 +105,5 @@ async function main() {
   run('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(root, 'scripts/prune-local-releases.ps1'), '-CurrentVersion', version, '-Mode', 'Release']);
   console.log('Built and verified Tauri release: ' + output);
 }
-main().catch(error => { console.error(error.message); console.error('Incomplete artifacts and isolated source are retained; no old packages were pruned.'); process.exitCode = 1; });
+if (require.main === module) main().catch(error => { console.error(error.message); console.error('Incomplete artifacts and isolated source are retained; no old packages were pruned.'); process.exitCode = 1; });
+module.exports = { buildIsolatedApp };

@@ -24,6 +24,7 @@ if (isTauri()) {
     setContentSize: (size) => send('set_content_size', { size }),
     checkUpdate: () => invoke('check_update'),
     installUpdate: () => invoke('install_update'),
+    onTibo: (callback) => subscribe('tibo:update', callback),
     hide: () => send('hide'),
     quit: () => send('quit'),
     onUsage: (callback) => subscribe('usage:update', callback),
