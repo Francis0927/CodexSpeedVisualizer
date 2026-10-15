@@ -515,10 +515,9 @@ fn install_candidate(candidate: &Candidate) -> Result<(), String> {
         candidate.version
     ));
     if kind == "installed" {
-        Command::new("explorer.exe")
-            .arg(&target)
-            .spawn()
-            .map_err(|e| e.to_string())?;
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let config = serde_json::json!({"installer":asset.name,"version":candidate.version,"sha256":expected,"target":exe.parent().ok_or("安装目录无效")?,"appPid":std::process::id(),"logDir":crate::settings::data_dir()});
+        launch_update_script(stage.path(), include_bytes!("../installed-update.ps1"), &config)?;
         let _ = stage.keep();
         return Ok(());
     }
@@ -540,24 +539,24 @@ fn install_candidate(candidate: &Candidate) -> Result<(), String> {
         return Err("便携更新程序版本或更新行为无效".into());
     }
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    fs::write(
-        stage.path().join("apply-update.ps1"),
-        include_bytes!("../portable-update.ps1"),
-    )
-    .map_err(|e| e.to_string())?;
     let config = serde_json::json!({"source":files,"target":exe.parent().unwrap(),"exe":"Codex Speed Pet.exe","appPid":std::process::id(),"logDir":crate::settings::data_dir()});
+    launch_update_script(stage.path(), include_bytes!("../portable-update.ps1"), &config)?;
+    let _ = stage.keep();
+    Ok(())
+}
+fn launch_update_script(stage: &Path, script: &[u8], config: &Value) -> Result<(), String> {
+    fs::write(stage.join("apply-update.ps1"), script).map_err(|e| e.to_string())?;
     fs::write(
-        stage.path().join("update.json"),
+        stage.join("update.json"),
         serde_json::to_vec(&config).unwrap(),
     )
     .map_err(|e| e.to_string())?;
     let mut command = Command::new("powershell.exe");
     command
         .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
-        .arg(stage.path().join("apply-update.ps1"));
+        .arg(stage.join("apply-update.ps1"));
     hidden(&mut command);
     command.spawn().map_err(|e| e.to_string())?;
-    let _ = stage.keep();
     Ok(())
 }
 

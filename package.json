@@ -1,6 +1,6 @@
 {
   "name": "codex-speed-pet",
-  "version": "0.6.7",
+  "version": "0.6.8",
   "private": true,
   "description": "A local Codex token speed car dashboard",
   "scripts": {
@@ -15,11 +15,13 @@
     "dist": "npm run dist:release",
     "prune:local": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prune-local-releases.ps1",
     "publish:github": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/publish-github.ps1",
+    "check:release-notes": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/publish-github.ps1 -CheckNotes",
+    "diagnose:release": "node scripts/release-diagnostics.cjs",
     "test:window": "npm run build && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/rust.ps1 build --release --locked --features custom-protocol && node tests/tauri-ui.test.cjs",
     "test:update-window": "npm run test:window",
     "test:topmost": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/rust.ps1 build --locked && node tests/tauri-window.test.cjs",
     "dist:release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-release.ps1",
-    "test:reference": "node --test tests/usage.test.cjs tests/topmost.test.cjs tests/release.test.cjs tests/release-actions.test.cjs tests/prune-local.test.cjs tests/update.test.cjs tests/main.test.cjs tests/tibo.test.cjs"
+    "test:reference": "node --test tests/usage.test.cjs tests/topmost.test.cjs tests/release.test.cjs tests/release-actions.test.cjs tests/prune-local.test.cjs tests/update.test.cjs tests/main.test.cjs tests/tibo.test.cjs tests/release-tools.test.cjs"
   },
   "dependencies": {
     "@tauri-apps/api": "2.12.3",

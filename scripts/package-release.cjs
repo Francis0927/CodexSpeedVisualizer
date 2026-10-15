@@ -6,6 +6,19 @@ const { run, hashFile, verifyRelease } = require('./verify-release.cjs');
 const root = path.resolve(__dirname, '..');
 const psQuote = value => "'" + value.replace(/'/g, "''") + "'";
 
+async function timed(label, action) {
+  const started = process.hrtime.bigint();
+  console.log('[package] ' + label + ' started');
+  try {
+    const result = await action();
+    console.log('[package] ' + label + ' completed in ' + (Number(process.hrtime.bigint() - started) / 1e9).toFixed(1) + 's');
+    return result;
+  } catch (error) {
+    console.error('[package] ' + label + ' failed after ' + (Number(process.hrtime.bigint() - started) / 1e9).toFixed(1) + 's');
+    throw error;
+  }
+}
+
 async function files(directory) {
   const result = [];
   for (const entry of await fsp.readdir(directory, { withFileTypes: true })) {
@@ -38,7 +51,9 @@ async function buildIsolatedApp(stage, version, env, execute = run) {
   const buildEnv = { ...env, CARGO_TARGET_DIR: targetRoot };
   // The renderer is already copied. Only compiler outputs are shared; source
   // and package inputs still come from the isolated, filtered source tree.
-  execute(process.execPath, [path.join(root, 'node_modules/@tauri-apps/cli/tauri.js'), 'build', '--features', 'custom-protocol', '--config', JSON.stringify({ build: { beforeBuildCommand: '' } })], { cwd: stage, env: buildEnv, timeout: 30 * 60 * 1000, maxBuffer: 8 * 1024 * 1024 });
+  // Stream Cargo/NSIS output so a successful build does not hide its compiler
+  // timings until the entire packaging step finishes.
+  await timed('isolated Rust build and NSIS bundle', () => execute(process.execPath, [path.join(root, 'node_modules/@tauri-apps/cli/tauri.js'), 'build', '--features', 'custom-protocol', '--config', JSON.stringify({ build: { beforeBuildCommand: '' } })], { cwd: stage, env: buildEnv, timeout: 30 * 60 * 1000, maxBuffer: 8 * 1024 * 1024, stdio: 'inherit' }));
   const target = path.join(targetRoot, 'release');
   // A shared target may also contain installers from earlier versions.
   const installers = (await fsp.readdir(path.join(target, 'bundle/nsis'))).filter(name => name.endsWith('_' + version + '_x64-setup.exe'));
@@ -49,7 +64,7 @@ async function main() {
   const pkg = JSON.parse(await fsp.readFile(path.join(root, 'package.json'), 'utf8'));
   const version = pkg.version;
   if (!/^\d+\.\d+\.\d+$/.test(version)) throw Error('Invalid release version');
-  if (!process.argv.includes('--skip-renderer')) run('npm.cmd', ['run', 'build'], { cwd: root, shell: true });
+  if (!process.argv.includes('--skip-renderer')) await timed('frontend build', () => run('npm.cmd', ['run', 'build'], { cwd: root, shell: true }));
   const inputs = [];
   for (const directory of ['src-tauri', 'src', 'dist', 'assets', 'scripts']) inputs.push(...await files(path.join(root, directory)));
   for (const file of ['package.json', 'package-lock.json', 'vite.config.ts', 'tsconfig.json', 'index.html']) inputs.push(path.join(root, file));
@@ -68,7 +83,7 @@ async function main() {
     const index = JSON.parse(await fsp.readFile(indexFile, 'utf8'));
     if (index.version !== version || index.sourceHash !== sourceHash || index.sourceCommit !== sourceCommit) throw Error('Build inputs changed for existing version. Increase the version.');
     for (const asset of index.assets) if ((await fsp.stat(path.join(output, asset.name))).size !== asset.size || await hashFile(path.join(output, asset.name)) !== asset.sha256) throw Error('Existing build checksum mismatch');
-    await verifyRelease(output, version);
+    await timed('verify reused release payloads', () => verifyRelease(output, version));
     await exportAssets(output, version, index.assets);
   } else {
     const stage = path.join(root, 'release/.github-build-' + version + '-' + randomUUID().replace(/-/g, ''));
@@ -91,8 +106,8 @@ async function main() {
     const installer = 'Codex-Speed-Pet-Setup-' + version + '.exe';
     const portable = 'Codex-Speed-Pet-portable-' + version + '.zip';
     await fsp.copyFile(installerPath, path.join(output, installer));
-    run('powershell.exe', ['-NoProfile', '-Command', 'Compress-Archive -LiteralPath ' + psQuote(path.join(output, 'app/Codex Speed Pet.exe')) + ',' + psQuote(path.join(output, 'app/build-kind.json')) + ' -DestinationPath ' + psQuote(path.join(output, portable))]);
-    await verifyRelease(output, version);
+    await timed('portable ZIP', () => run('powershell.exe', ['-NoProfile', '-Command', 'Compress-Archive -LiteralPath ' + psQuote(path.join(output, 'app/Codex Speed Pet.exe')) + ',' + psQuote(path.join(output, 'app/build-kind.json')) + ' -DestinationPath ' + psQuote(path.join(output, portable))]));
+    await timed('verify EXE, NSIS and ZIP payloads', () => verifyRelease(output, version));
     const sums = [];
     for (const name of [installer, portable]) sums.push(await hashFile(path.join(output, name)) + '  ' + name);
     await fsp.writeFile(path.join(output, 'SHA256SUMS.txt'), sums.join('\n') + '\n');

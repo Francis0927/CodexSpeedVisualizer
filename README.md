@@ -18,6 +18,8 @@ Windows 桌面 Codex 用量仪表盘，基于 Tauri 2 + Rust + React，支持 Wi
 
 从 [GitHub Releases](https://github.com/Francis0927/CodexSpeedVisualizer/releases) 下载安装版或便携 ZIP。安装版仅为当前用户安装；便携版解压后运行 `Codex Speed Pet.exe`，保留同目录的 `build-kind.json`。需要 Microsoft Edge WebView2，缺少时按程序提示安装。
 
+安装器默认不勾选创建桌面快捷方式，可手动选择。静默安装和应用内更新不新增桌面快捷方式，已有的会保留。
+
 拖动顶部移动窗口，设置和托盘菜单可调整窗口大小、置顶、吸附、动画及开机启动。点击「−」隐藏到托盘，双击托盘图标恢复窗口。
 
 - **自动折叠**：离开窗口后收起标题与额度，鼠标移入完整展开；打开设置或详情时保持展开。
@@ -55,6 +57,8 @@ npm run dist:release     # 本地隔离打包并校验
 
 安装版和便携版统一通过 [GitHub Releases](https://github.com/Francis0927/CodexSpeedVisualizer/releases) 更新。启动后 5 秒、之后每 4 小时检查一次，也可在设置或托盘菜单手动检查；下载后校验大小和 SHA-256。Electron 旧版、内网版及无更新地址版需手动升级一次。
 
+安装版的应用内更新会等待旧进程退出，在原安装目录静默覆盖文件，保留设置和统计记录，完成后自动重启，不再弹出卸载选择页。失败保留下载的安装包及 `updater-script-last.log` 供重试和排查。
+
 发布前递增 `package.json` 和 `src-tauri/Cargo.toml` 的版本，提交并推送代码，保持工作区干净；发布工作流须已推送到默认分支。
 
 ```powershell
@@ -64,6 +68,15 @@ npm run publish:github -- -Notes "更新说明"
 该命令触发并等待 GitHub Actions，在 Windows runner 上构建、校验并保存产物，再上传草稿，全部附件核对成功后正式发布。正式发布不使用本机包；标签为 `v版本号`，仅发布正式版本，不覆盖历史 Release 或同版本附件。重试只复用同版本、同提交的已验证产物；产物过期且已有附件时需递增版本。
 
 发布凭据通过 `GH_TOKEN`、`GITHUB_TOKEN` 或 Git 凭据管理器读取，需要 Contents 与 Actions 写权限；runner 使用内置 `GITHUB_TOKEN`。详细发布与清理约束见 [AGENTS.md](AGENTS.md)。
+
+以下命令仅检查参数或读取运行耗时，不会触发发布，也无需修改系统 PowerShell 执行策略：
+
+```powershell
+npm run check:release-notes -- -Notes "新增 Tibo Reset 预测"
+npm run diagnose:release -- 38693309455 38694892389
+```
+
+打包日志会输出前端构建、隔离 Rust/NSIS 构建、ZIP 创建和产物校验的阶段耗时，并实时显示编译进度。
 
 ## 致谢
 

@@ -185,7 +185,7 @@ export default function App() {
     : updateStatus.state === "latest" ? `已是最新（v${appInfo.version}）`
     : updateStatus.state === "available" ? `发现新版本 v${updateStatus.version}${updateStatus.notes ? `：${updateStatus.notes}` : ""}`
     : updateStatus.state === "downloading" ? "正在下载更新文件…"
-    : updateStatus.state === "installing" ? "正在启动更新，应用即将退出…"
+    : updateStatus.state === "installing" ? "正在静默更新，完成后自动重启…"
     : updateStatus.state === "error" ? updateStatus.message || "检查更新失败"
     : updateStatus.state === "unsupported" ? "当前环境不支持更新"
     : `当前版本 v${appInfo.version || "-"}`;
