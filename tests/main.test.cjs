@@ -44,8 +44,8 @@ async function fixture(lock = true) {
     Menu: { buildFromTemplate: value => value }, screen: { getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }) },
     nativeImage: { createFromPath: file => { calls.trayIcon = file; return { resize() { return {}; } }; } } };
   const loaded = { exports: {} };
-  vm.runInNewContext(fs.readFileSync(path.resolve(__dirname, '../electron/main.cjs'), 'utf8'), {
-    module: loaded, __dirname: path.resolve(__dirname, '../electron'), process: { env: {}, platform: 'win32' },
+  vm.runInNewContext(fs.readFileSync(path.resolve(__dirname, './reference/electron/main.cjs'), 'utf8'), {
+    module: loaded, __dirname: path.resolve(__dirname, './reference/electron'), process: { env: {}, platform: 'win32' },
     setTimeout, clearTimeout, require: name => name === 'electron' ? electron
       : name === 'node:fs' ? { readFileSync() { throw Error('first launch'); } }
       : name === './usage.cjs' ? { UsageCollector: class { start() { calls.starts++; } snapshot() { return {}; } stop() {} } }

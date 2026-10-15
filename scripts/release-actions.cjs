@@ -36,8 +36,15 @@ class ActionsRelease {
       throw error;
     }
     if (workflow.state !== "active" || workflow.path !== `.github/workflows/${WORKFLOW}`) throw new Error("Release workflow 不可用。请先将工作流提交并推送到默认分支，并启用 GitHub Actions。");
-    // Verify the frozen commit includes the workflow before creating a tag.
-    await this.call("GET", `${API}/contents/.github/workflows/${WORKFLOW}?ref=${commit}`);
+    // The exact workflow revision must already be installed on the default
+    // branch before a migration tag can dispatch the release pipeline.
+    const repo = await this.call("GET", API);
+    if (!repo.default_branch) throw new Error("无法确认 GitHub 默认分支，不会触发发布。");
+    const [frozen, installed] = await Promise.all([
+      this.call("GET", `${API}/contents/.github/workflows/${WORKFLOW}?ref=${commit}`),
+      this.call("GET", `${API}/contents/.github/workflows/${WORKFLOW}?ref=${encodeURIComponent(repo.default_branch)}`)
+    ]);
+    if (!/^[a-f0-9]{40}$/.test(frozen.sha || '') || frozen.sha !== installed.sha) throw new Error("本次 Release workflow 尚未推送到默认分支。请先更新默认分支工作流，再发布；不会创建标签或触发旧流程。");
     await this.ensureTag(version, commit);
     const requestId = randomUUID();
     const title = `Release v${version} (${requestId})`;

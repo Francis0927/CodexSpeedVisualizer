@@ -1,0 +1,38 @@
+[package]
+name = "codex-speed-pet"
+version = "0.6.4"
+edition = "2021"
+rust-version = "1.90"
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]
+
+[[bin]]
+name = "codex-speed-pet"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+serde_json = "1"
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-single-instance = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["clock"] }
+notify = "8"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+sha2 = "0.10"
+tempfile = "3"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading", "Win32_System_ProcessStatus"] }
+winreg = "0.55"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

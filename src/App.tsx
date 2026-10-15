@@ -127,13 +127,13 @@ export default function App() {
 
   useEffect(() => {
     let mounted = true;
-    window.speedPet?.getInitial().then((initial) => {
-      if (mounted) { setUsage(initial.usage); setSettings(initial.settings); setAppInfo(initial.appInfo); setUpdateStatus(initial.updateStatus); }
-    });
     const offUsage = window.speedPet?.onUsage(setUsage);
     const offSettings = window.speedPet?.onSettings(setSettings);
     const offUpdate = window.speedPet?.onUpdateStatus(setUpdateStatus);
     const offOpenSettings = window.speedPet?.onOpenSettings(() => setPanel("settings"));
+    window.speedPet?.getInitial().then((initial) => {
+      if (mounted) { setUsage(initial.usage); setSettings(initial.settings); setAppInfo(initial.appInfo); setUpdateStatus(initial.updateStatus); }
+    }).catch(console.error);
     const timer = setInterval(() => setClock(Date.now()), 1000);
     return () => { mounted = false; offUsage?.(); offSettings?.(); offUpdate?.(); offOpenSettings?.(); clearInterval(timer); };
   }, []);
@@ -163,7 +163,10 @@ export default function App() {
   const speedLabel = speed >= 10 ? speed.toFixed(0) : speed.toFixed(1);
   const update = (patch: Partial<AppSettings>) => {
     setSettings((current) => ({ ...current, ...patch }));
-    window.speedPet?.updateSettings(patch).then(setSettings);
+    window.speedPet?.updateSettings(patch).then(setSettings).catch((error) => {
+      console.error(error);
+      window.speedPet?.getInitial().then((initial) => setSettings(initial.settings)).catch(console.error);
+    });
   };
   const checkUpdate = () => { setUpdateStatus((s) => ({ ...s, state: "checking" })); window.speedPet?.checkUpdate().then(setUpdateStatus); };
   const installUpdate = () => { window.speedPet?.installUpdate().then(setUpdateStatus); };
@@ -205,8 +208,8 @@ export default function App() {
     onMouseLeave={() => setHovered(false)}
     onClick={() => setExpanded(true)}>
     <div className="window-header">
-    <div className="topbar">
-      <div className="brand"><span className="brand-icon">✦</span><span>CODEX <strong>DRIVE</strong></span></div>
+    <div className="topbar" data-tauri-drag-region>
+      <div className="brand" data-tauri-drag-region><span className="brand-icon" data-tauri-drag-region>✦</span><span data-tauri-drag-region>CODEX <strong data-tauri-drag-region>DRIVE</strong></span></div>
       <div className="window-actions">
         <button type="button" className={`icon-button ${updateAvailable ? "has-update" : ""}`} title={updateAvailable ? `设置：新版本 v${updateStatus.version} 可更新` : "设置"} aria-label="设置" onClick={() => setPanel(panel === "settings" ? "none" : "settings")}>⚙</button>
         <button type="button" className="icon-button" title="隐藏到托盘" aria-label="隐藏到托盘" onClick={() => window.speedPet?.hide()}>−</button>

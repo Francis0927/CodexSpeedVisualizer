@@ -8,13 +8,13 @@ fs.writeFileSync(path.join(data,'settings.json'),JSON.stringify({size:'small',au
 app.setPath('userData',data);app.disableHardwareAcceleration();
 BrowserWindow.prototype.show=function(){};
 let usage={day:null,input:100000,output:5000,total:34260000,historyTotal:2480000000,rateLimits:{updatedAt:Date.now(),fiveHour:{remainingPercent:19,resetsAt:Date.now()+7500000},weekly:{remainingPercent:77,resetsAt:Date.now()+450000000}},speed:132,turnSpeed:null,turnTokens:null,turnSeconds:null,active:false,running:false,lastEvent:null,eventCount:0,source:'ready',error:null};
-const {UsageCollector}=require('../electron/usage.cjs');
+const {UsageCollector}=require('./electron/usage.cjs');
 UsageCollector.prototype.snapshot=function(){return usage;};
 // Use the real main process and IPC, with an offscreen window so hidden test
 // frames still run ResizeObserver just as the visible application does.
 const Module=require('node:module');
 const nativeElectron=require('electron');
-const mainPath=path.resolve(__dirname,'../electron/main.cjs');
+const mainPath=path.resolve(__dirname,'./electron/main.cjs');
 const loadModule=Module._load;
 Module._load=function(request,parent,isMain){
  if(request==='electron' && parent?.filename===mainPath){

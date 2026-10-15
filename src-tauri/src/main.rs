@@ -1,0 +1,88 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod desktop;
+mod native;
+mod settings;
+mod update;
+mod usage;
+
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(index) = args.iter().position(|a| a == "--test-window") {
+        desktop::window_test(std::path::PathBuf::from(
+            args.get(index + 1).expect("test report path"),
+        ));
+        return;
+    }
+    if let Some(index) = args.iter().position(|a| a == "--benchmark") {
+        let home = std::path::PathBuf::from(args.get(index + 1).expect("fixture home"));
+        let clock = args.get(index + 2).expect("fixture clock").parse().unwrap();
+        let mut collector = usage::Collector::new(home, 0);
+        let start = std::time::Instant::now();
+        let snapshot = collector.poll(clock, false);
+        let scan = start.elapsed().as_secs_f64() * 1000.0;
+        let start = std::time::Instant::now();
+        for _ in 0..100 {
+            let _ = collector.snapshot(clock);
+        }
+        let snapshot_ms = start.elapsed().as_secs_f64() * 10.0;
+        let memory = native::process_memory();
+        println!(
+            "{}",
+            serde_json::json!({"scanMs":scan,"snapshotMs":snapshot_ms,"workingSetBytes":memory.0,"peakWorkingSetBytes":memory.1,"historyTotal":snapshot.history_total,"eventCount":snapshot.event_count})
+        );
+        return;
+    }
+    if args.iter().any(|a| a == "--package-info") {
+        let value = serde_json::json!({"version":env!("CARGO_PKG_VERSION"),"appId":"dev.codex.speedpet","runtime":"tauri","frontendEmbedded":cfg!(feature="custom-protocol"),"buildKind":update::build_kind(),"updateEnabled":update::enabled(),"repository":update::REPOSITORY});
+        println!("{value}");
+        return;
+    }
+    if args.iter().any(|a| a == "--replay") {
+        // Offline parity harness. Reads synthetic fixture operations from stdin;
+        // never initializes a webview, tray, update timer or user settings.
+        use std::io::{self, Read};
+        let mut input = String::new();
+        io::stdin().read_to_string(&mut input).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&input).unwrap();
+        let home = std::path::PathBuf::from(value["home"].as_str().unwrap());
+        let mut collector = usage::Collector::new(home, value["resetAt"].as_i64().unwrap_or(0));
+        let mut snapshots = vec![];
+        for op in value["ops"].as_array().unwrap() {
+            let clock = op["now"].as_i64().unwrap();
+            if let Some(writes) = op["writes"].as_array() {
+                for write in writes {
+                    let path = std::path::PathBuf::from(write["path"].as_str().unwrap());
+                    if write["delete"] == true {
+                        std::fs::remove_file(path).unwrap();
+                        continue;
+                    }
+                    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                    if write["append"] == true {
+                        use std::io::Write;
+                        let mut f = std::fs::OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open(path)
+                            .unwrap();
+                        f.write_all(write["text"].as_str().unwrap().as_bytes())
+                            .unwrap();
+                    } else {
+                        std::fs::write(path, write["text"].as_str().unwrap()).unwrap();
+                    }
+                }
+            }
+            let result = if let Some(reset) = op["reset"].as_i64() {
+                collector.reset(clock, reset)
+            } else {
+                collector.poll(clock, true)
+            };
+            snapshots.push(result);
+        }
+        println!("{}", serde_json::to_string(&snapshots).unwrap());
+        return;
+    }
+    if !native::ensure_webview() {
+        return;
+    }
+    desktop::run();
+}

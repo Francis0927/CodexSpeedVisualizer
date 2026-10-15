@@ -1,0 +1,71 @@
+name: Windows branch build
+run-name: Build ${{ github.ref_name }} (${{ github.sha }})
+
+on:
+  push:
+    branches:
+      - codex/tauri-migration
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: branch-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: github.repository == 'Francis0927/CodexSpeedVisualizer'
+    runs-on: windows-2022
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install locked Rust toolchain
+        run: rustup toolchain install 1.99.0 --profile minimal --target x86_64-pc-windows-msvc
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Read branch version
+        id: version
+        run: |
+          $taskPackage = Get-Content -LiteralPath package.json -Raw | ConvertFrom-Json
+          if ($taskPackage.version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid branch version' }
+          "version=$($taskPackage.version)" >> $env:GITHUB_OUTPUT
+
+      - name: Test
+        run: npm test
+
+      - name: Test actual WebView2 dashboard
+        run: npm run test:window
+
+      - name: Test native Windows topmost
+        run: npm run test:topmost
+
+      - name: Build and verify installer and portable ZIP
+        run: npm run dist:release
+
+      - name: Preserve verified branch packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: tauri-branch-v${{ steps.version.outputs.version }}-${{ github.sha }}-${{ github.run_attempt }}
+          path: release/GitHub-Release-v${{ steps.version.outputs.version }}/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+          overwrite: false
+
+      - name: Verify actual NSIS install and custom-directory update handoff
+        run: node scripts/verify-installed.cjs release/github-${{ steps.version.outputs.version }} ${{ steps.version.outputs.version }}

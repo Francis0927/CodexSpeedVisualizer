@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
-const { UsageCollector, dayKey, newFileState, acceptBytes } = require("../electron/usage.cjs");
+const { UsageCollector, dayKey, newFileState, acceptBytes } = require("./reference/electron/usage.cjs");
 
 function record(time, id, input, output) {
   return JSON.stringify({ timestamp: new Date(time).toISOString(), type: "token_usage_record", payload: {

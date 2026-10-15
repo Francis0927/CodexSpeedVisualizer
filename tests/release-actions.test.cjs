@@ -6,7 +6,7 @@ const version = "1.2.3", commit = "a".repeat(40);
 const api = `https://api.github.com/repos/${REPOSITORY}`;
 const notFound = () => Object.assign(new Error("Not found"), { status: 404 });
 
-function dispatchFixture({ conflict = false, conclusion = "success", modern = false, disabled = false, noRun = false, neverComplete = false, wrongSha = false } = {}) {
+function dispatchFixture({ conflict = false, conclusion = "success", modern = false, disabled = false, noRun = false, neverComplete = false, wrongSha = false, staleWorkflow = false } = {}) {
   const calls = [], logs = [];
   let tag = null, title, polls = 0, elapsed = 0;
   const call = async (method, url, options = {}) => {
@@ -19,9 +19,9 @@ function dispatchFixture({ conflict = false, conclusion = "success", modern = fa
     }
     if (method === "POST" && url.endsWith("/git/refs")) { tag = options.json.sha; return {}; }
     if (method !== "GET") throw new Error(`Unexpected mutation: ${method} ${url}`);
-    if (url === api) return { permissions: { push: true } };
+    if (url === api) return { permissions: { push: true }, default_branch: 'main' };
     if (parsed.pathname.endsWith("/contents/package.json")) return { content: Buffer.from(JSON.stringify({ version })).toString("base64") };
-    if (parsed.pathname.endsWith("/contents/.github/workflows/release.yml")) return {};
+    if (parsed.pathname.endsWith("/contents/.github/workflows/release.yml")) return { sha: staleWorkflow && parsed.searchParams.get('ref') === 'main' ? 'd'.repeat(40) : 'c'.repeat(40) };
     if (url.endsWith("/releases/latest")) throw notFound();
     if (url.endsWith(`/git/ref/tags/v${version}`)) {
       if (conflict) return { object: { type: "commit", sha: "b".repeat(40) } };
@@ -61,6 +61,11 @@ test("disabled workflows and conflicting tags never dispatch or replace a tag", 
     await assert.rejects(sample.actions.dispatch(version, commit));
     assert.ok(!sample.calls.some(call => call.method !== "GET"));
   }
+});
+test('changed release workflow must reach the default branch before any tag or dispatch mutation', async () => {
+  const sample = dispatchFixture({ staleWorkflow: true });
+  await assert.rejects(sample.actions.dispatch(version, commit), /尚未推送到默认分支/);
+  assert.ok(!sample.calls.some(call => call.method !== 'GET'));
 });
 
 test("failed or cancelled Actions runs return an error with the actual run link", async () => {

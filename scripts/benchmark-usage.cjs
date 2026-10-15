@@ -107,7 +107,7 @@ async function runCase(name, modulePath) {
     return;
   }
   console.log(JSON.stringify({ node: process.version, samples: "synthetic; same inputs for baseline and current" }));
-  const versions = [{ version: "current", module: path.resolve(__dirname, "../electron/usage.cjs") }];
+  const versions = [{ version: "current", module: path.resolve(__dirname, "../tests/reference/electron/usage.cjs") }];
   if (args.includes("--baseline")) versions.unshift({ version: "baseline", module: path.resolve(option("--baseline")) });
   for (const version of versions) {
     for (const name of cases) {

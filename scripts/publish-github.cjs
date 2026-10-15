@@ -4,7 +4,7 @@ const path = require("node:path");
 const https = require("node:https");
 const { createHash } = require("node:crypto");
 const { spawnSync } = require("node:child_process");
-const { compareVersions, releaseVersion } = require("../electron/github-update.cjs");
+const { compareVersions, releaseVersion } = require("./github-update.cjs");
 
 const REPOSITORY = "Francis0927/CodexSpeedVisualizer";
 const ROOT = path.resolve(__dirname, "..");
@@ -111,7 +111,7 @@ class GithubPublisher {
     let release = await this.findRelease(tag);
     if (!release) release = await this.call("POST", `${this.api}/releases`, { json: {
       tag_name: tag, target_commitish: commit, name: `Codex Drive ${version}`, draft: true, prerelease: false,
-      body: `${notes}${notes ? "\n\n" : ""}安装版与便携版均支持从 GitHub 检查、下载并更新。旧内网版及旧无更新地址版需手动升级一次。SHA256SUMS.txt 提供校验值。`
+      body: `${notes}${notes ? "\n\n" : ""}安装版与便携版均支持从 GitHub 检查、下载并更新。所有 Electron 旧版首次切换到 Tauri 时需手动升级一次（含旧内网版和无更新地址版）：安装版退出并卸载旧程序后安装新版，保留用户数据；便携版解压到新目录运行，旧便携更新器不能自动切换纯 Tauri ZIP。之后统一从 GitHub 更新。需要 Microsoft Edge WebView2，缺少时按提示安装。SHA256SUMS.txt 提供校验值。`
     } });
     if (release.draft && release.target_commitish !== commit) throw new Error("现有草稿指向其他源提交，不会自动改写或公开它。");
     if (release.prerelease) throw new Error("目标 Release 是预发布版本，不会作为正式更新发布。");
@@ -157,7 +157,7 @@ async function localAssets(version, commit) {
     if (stat.size !== expected.size || await hashFile(file) !== expected.sha256) throw new Error(`Local asset checksum mismatch: ${name}`);
     assets.push({ ...expected, file });
   }
-  await require("./verify-release.cjs").verifyRelease(path.join(directory, "win-unpacked/resources/app.asar"), version);
+  await require("./verify-release.cjs").verifyRelease(directory, version);
   return assets;
 }
 
