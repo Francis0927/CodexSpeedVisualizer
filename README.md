@@ -71,6 +71,8 @@ npm run publish:github -- -Notes "更新说明"
 
 该命令触发并等待 GitHub Actions，在 Windows runner 上构建、校验并保存产物，再上传草稿，全部附件核对成功后正式发布。正式发布不使用本机包；标签为 `v版本号`，仅发布正式版本，不覆盖历史 Release 或同版本附件。重试只复用同版本、同提交的已验证产物；产物过期且已有附件时需递增版本。
 
+GitHub Actions 仅保留 Release 工作流。推送 main 不再自动测试或打包；完整测试、安装包与便携 ZIP 构建、校验和上传统一在发布时执行。
+
 发布凭据通过 `GH_TOKEN`、`GITHUB_TOKEN` 或 Git 凭据管理器读取，需要 Contents 与 Actions 写权限；runner 使用内置 `GITHUB_TOKEN`。详细发布与清理约束见 [AGENTS.md](AGENTS.md)。
 
 以下命令仅检查参数或读取运行耗时，不会触发发布，也无需修改系统 PowerShell 执行策略：
