@@ -34,7 +34,15 @@ async function main() {
     assert.equal(await exists(desktopLink), false, 'silent install must not create a desktop link by default');
     assert.equal(await exists(startLink), true, 'default start-menu entry is retained');
     await fs.writeFile(path.join(target, 'user-note.txt'), 'preserve during update');
+    await fs.copyFile(exe, path.join(target, 'SpeedPet.exe'));
     await fs.writeFile(path.join(target, 'update-share.json'), 'legacy local config');
+    // No /UPDATE, /P or /S: select overwrite mode as on double-click.
+    // The post-install launch only probes package info, avoiding live user data.
+    run(installer, ['/ARGS', '--package-info', '/D=' + target], { timeout: 240000, windowsVerbatimArguments: true });
+    inspectExe(exe, version, 'installed');
+    assert.equal(await fs.readFile(path.join(target, 'user-note.txt'), 'utf8'), 'preserve during update');
+    assert.equal(await exists(desktopLink), false, 'manual upgrade must not add a desktop shortcut');
+    await fs.copyFile(exe, path.join(target, 'SpeedPet.exe'));
     const stage = await fs.mkdtemp(path.join(os.tmpdir(), 'codex-speed-pet-update-'));
     const setupName = path.basename(installer);
     await fs.copyFile(installer, path.join(stage, setupName));
@@ -45,6 +53,7 @@ async function main() {
     run('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(stage, 'apply-update.ps1'), '-NoRestart'], { timeout: 300000 });
     inspectExe(exe, version, 'installed');
     if (await hashFile(exe) !== expected) throw Error('Reinstalled payload differs');
+    assert.equal(await exists(path.join(target, 'SpeedPet.exe')), false, 'installer clears the stale generated runtime before the next launch');
     assert.equal(await exists(desktopLink), false, 'silent update must not add a desktop link');
     assert.equal(await fs.readFile(path.join(target, 'user-note.txt'), 'utf8'), 'preserve during update');
     assert.equal(await fs.readFile(path.join(target, 'update-share.json'), 'utf8'), 'legacy local config');

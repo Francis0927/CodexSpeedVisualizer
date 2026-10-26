@@ -81,6 +81,7 @@ button { font: inherit; }
 .mini-button { flex: none; padding: 5px 9px; border: 1px solid rgba(182, 232, 214, .28); border-radius: 8px; background: rgba(5, 27, 36, .4); color: #cdeee0; cursor: pointer; font-size: 11px; }
 .mini-button:hover:not(:disabled) { background: rgba(162, 235, 211, .14); color: #fff; }
 .mini-button:disabled { opacity: .45; cursor: default; }
+.mini-button option { background: #102b3b; color: #cdeee0; }
 .update-row { display: flex; align-items: center; gap: 8px; min-height: 46px; padding: 6px 0; border-top: 1px solid rgba(213, 255, 228, .1); }
 .history-reset-row { display: flex; align-items: center; gap: 5px; min-height: 50px; padding: 6px 0; border-top: 1px solid rgba(213, 255, 228, .1); }
 .update-info { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; color: #dff5eb; font-size: 12px; }

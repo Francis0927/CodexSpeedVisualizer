@@ -2,6 +2,7 @@
 mod desktop;
 mod docking;
 mod native;
+mod runtime;
 mod settings;
 mod tibo;
 mod update;
@@ -94,6 +95,21 @@ fn main() {
         }
         println!("{}", serde_json::to_string(&snapshots).unwrap());
         return;
+    }
+    match runtime::launch() {
+        Ok(true) => return,
+        Ok(false) => {}
+        Err(error) => {
+            let message = format!("无法启动 SpeedPet 运行进程：{error}。请确认应用目录可写，并关闭仍在运行的旧版后重试。");
+            update::log(&message);
+            #[cfg(windows)]
+            unsafe {
+                use windows::{core::{w, PCWSTR}, Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK}};
+                let text: Vec<u16> = message.encode_utf16().chain(Some(0)).collect();
+                MessageBoxW(None, PCWSTR(text.as_ptr()), w!("Codex Drive 启动失败"), MB_OK | MB_ICONERROR);
+            }
+            std::process::exit(1);
+        }
     }
     if !native::ensure_webview() {
         return;

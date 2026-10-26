@@ -26,11 +26,11 @@ export function describeTibo(snapshot: TiboSnapshot, now: number) {
   return { status: snapshot.data ? "暂无重置信号" : snapshot.error ? "暂时无法查询" : "正在查询…", detail: "" };
 }
 
-export default function TiboPrediction({ snapshot, now }: { snapshot: TiboSnapshot; now: number }) {
+export default function TiboPrediction({ snapshot, now, pollMinutes = 10 }: { snapshot: TiboSnapshot; now: number; pollMinutes?: number }) {
   const prediction = describeTibo(snapshot, now);
   const last = snapshot.data?.latest_reset;
   // A suspended machine can wake with an old result before its next poll completes.
-  const stale = snapshot.fetchedAt !== null && now - snapshot.fetchedAt > 31 * 60 * 1000;
+  const stale = snapshot.fetchedAt !== null && now - snapshot.fetchedAt > (pollMinutes + 1) * 60 * 1000;
   return <section className="tibo-prediction" aria-label="Tibo Reset 预测">
     <div className="tibo-title">Tibo Reset 预测</div>
     <strong className="tibo-status">{prediction.status}</strong>

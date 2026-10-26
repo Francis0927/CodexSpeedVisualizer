@@ -68,6 +68,13 @@
     await waitFor('small settings grows to medium', () => settledView('medium') && document.querySelector('.overlay'));
     assert((await window.speedPet.getInitial()).settings.size === 'small', 'selected small size retained');
     checks.push('settings temporary medium size');
+    const interval = document.querySelector('[aria-label="Reset 检测间隔"]');
+    assert(interval?.value === '10', 'legacy settings default to ten minutes');
+    interval.value = '5';
+    interval.dispatchEvent(new Event('change', { bubbles: true }));
+    await waitFor('reset polling interval saved through React and Rust', async () =>
+      (await window.speedPet.getInitial()).settings.tiboPollMinutes === 5 && interval.value === '5');
+    checks.push('Reset interval default and settings persistence');
     document.querySelector('[aria-label="设置"]').click();
     await waitFor('close restores small view', () => settledView('small') && !document.querySelector('.overlay'));
     document.querySelector('.shell').dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body }));
@@ -110,8 +117,9 @@
     });
     checks.push('edge dock switch, native topmost exclusion and full content');
     const initial = await window.speedPet.getInitial();
+    const runtime = await invoke('test_window_state');
     assert(initial.settings.historyResetAt === 12345 || initial.settings.historyResetAt === undefined, 'legacy reset preserved');
-    await invoke('test_report', { result: { passed: true, checks, version: initial.appInfo.version, usage: initial.usage, settings: initial.settings } });
+    await invoke('test_report', { result: { passed: true, checks, version: initial.appInfo.version, usage: initial.usage, settings: initial.settings, runtime } });
   } catch (error) {
     await invoke('test_report', { result: { passed: false, error: String(error), checks, shell: document.querySelector('.shell')?.className, panelOpen: !!document.querySelector('.overlay'), width: innerWidth, height: innerHeight, viewport: document.querySelector('.viewport')?.getBoundingClientRect().toJSON(), beforeUpdate } });
   }

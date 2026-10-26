@@ -1,6 +1,6 @@
 {
   "name": "codex-speed-pet",
-  "version": "0.6.9",
+  "version": "0.6.12",
   "private": true,
   "description": "A local Codex token speed car dashboard",
   "scripts": {

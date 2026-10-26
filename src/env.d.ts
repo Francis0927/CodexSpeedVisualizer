@@ -42,6 +42,7 @@ export type AppSettings = {
   size: "small" | "medium" | "large";
   /** Fold to the dial until hover or click; retains the legacy setting key. */
   autoHideChrome: boolean;
+  tiboPollMinutes: number;
   /**
    * Size the renderer should draw at right now. Sent by the main process with
    * every settings payload (never persisted): while a panel is open the window

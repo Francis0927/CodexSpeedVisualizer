@@ -52,3 +52,9 @@ test('display keeps the requested title and Chinese summary without English cont
   assert.match(html, /有效至/);
   assert.doesNotMatch(html, /today|script|alert|查询于|来源|Codex Resets|每 30 分钟|href=/);
 });
+
+test('stale result warning follows the configured polling interval', () => {
+  const value = { ...snapshot({}), fetchedAt: now - 12 * 60 * 1000 };
+  assert.match(render(value), /结果待更新/);
+  assert.doesNotMatch(renderToStaticMarkup(React.createElement(TiboPrediction, { snapshot: value, now, pollMinutes: 30 })), /结果待更新/);
+});

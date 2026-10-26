@@ -21,6 +21,7 @@ test('installer hooks compile with real NSIS, default desktop opt-out and preser
   await fsp.writeFile(script, `Unicode true
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
+!include "FileFunc.nsh"
 Var NoShortcutMode
 Var AppStartMenuFolder
 !define PRODUCTNAME "Codex Speed Pet"
@@ -55,6 +56,78 @@ SectionEnd
   const result = spawnSync(compiler, ['/V2', script], { encoding: 'utf8', windowsHide: true, timeout: 30000 });
   assert.equal(result.status, 0, result.stderr || result.stdout || result.error?.message);
   assert.ok((await fsp.stat(output)).size > 0, 'compiled fixture is never executed');
+});
+
+test('double-clicked installer relaunches a known Tauri installation in overwrite mode without invoking maintenance uninstall', async t => {
+  const compiler = path.join(process.env.LOCALAPPDATA || '', 'tauri/NSIS/makensis.exe');
+  if (process.platform !== 'win32' || !fs.existsSync(compiler)) { t.skip('requires NSIS'); return; }
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'codex-in-place-'));
+  t.after(() => fsp.rm(root, { recursive: true, force: true }));
+  const target = path.join(root, 'existing install with spaces');
+  await fsp.mkdir(target);
+  await fsp.writeFile(path.join(target, 'Codex Speed Pet.exe'), 'old');
+  await fsp.writeFile(path.join(target, 'build-kind.json'), '{"kind":"installed","appId":"dev.codex.speedpet"}');
+  await fsp.writeFile(path.join(target, 'user-note.txt'), 'preserve');
+  const output = path.join(root, 'setup.exe');
+  const script = path.join(root, 'setup.nsi');
+  await fsp.writeFile(script, `Unicode true
+!include "MUI2.nsh"
+!include "LogicLib.nsh"
+!include "FileFunc.nsh"
+!include "${path.resolve(__dirname, '../src-tauri/installer-hooks.nsh')}"
+Var PassiveMode
+Name "Isolated in-place upgrade fixture"
+OutFile "${output}"
+InstallDir "${path.join(root, 'wrong destination')}"
+RequestExecutionLevel user
+!define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive
+!insertmacro MUI_PAGE_WELCOME
+Page custom Maintenance
+!insertmacro MUI_PAGE_INSTFILES
+!insertmacro MUI_LANGUAGE "English"
+Function .onInit
+  \${GetOptions} $CMDLINE "/P" $PassiveMode
+  \${IfNot} \${Errors}
+    StrCpy $PassiveMode 1
+    SetAutoClose true
+  \${EndIf}
+FunctionEnd
+Function SkipIfPassive
+  \${IfThen} $PassiveMode = 1 \${|} Abort \${|}
+FunctionEnd
+Function Maintenance
+  ClearErrors
+  \${GetOptions} $CMDLINE "/UPDATE" $0
+  \${If} \${Errors}
+    FileOpen $0 "$INSTDIR\\uninstaller-called.txt" w
+    FileClose $0
+  \${EndIf}
+  Abort
+FunctionEnd
+Section
+  SetOutPath "$INSTDIR"
+  FileOpen $0 "$INSTDIR\\arguments.txt" w
+  FileWrite $0 $CMDLINE
+  FileClose $0
+  FileOpen $0 "$INSTDIR\\Codex Speed Pet.exe" w
+  FileWrite $0 "new"
+  FileClose $0
+SectionEnd
+`);
+  const compiled = spawnSync(compiler, ['/V2', script], { encoding: 'utf8', windowsHide: true, timeout: 30000 });
+  assert.equal(compiled.status, 0, compiled.stderr || compiled.stdout);
+  // No /UPDATE, /P or /S: exercise the same entry as double-clicking setup.
+  const result = spawnSync(output, ['/D=' + target], { encoding: 'utf8', windowsHide: true, windowsVerbatimArguments: true, timeout: 30000 });
+  assert.equal(result.status, 0, JSON.stringify({ stderr: result.stderr, error: result.error?.message, files: await fsp.readdir(target), arguments: await fsp.readFile(path.join(target, 'arguments.txt'), 'utf8').catch(() => null) }));
+  assert.equal(await fsp.readFile(path.join(target, 'Codex Speed Pet.exe'), 'utf8'), 'new');
+  assert.equal(await fsp.readFile(path.join(target, 'user-note.txt'), 'utf8'), 'preserve');
+  assert.match(await fsp.readFile(path.join(target, 'arguments.txt'), 'utf8'), /\/P \/UPDATE \/R \/NS/);
+  assert.equal(fs.existsSync(path.join(target, 'uninstaller-called.txt')), false);
+  await fsp.writeFile(path.join(target, 'build-kind.json'), '{"kind":"portable","appId":"dev.codex.speedpet"}');
+  const unknown = spawnSync(output, ['/P', '/D=' + target], { encoding: 'utf8', windowsHide: true, windowsVerbatimArguments: true, timeout: 30000 });
+  assert.equal(unknown.status, 0, unknown.stderr || unknown.error?.message);
+  assert.doesNotMatch(await fsp.readFile(path.join(target, 'arguments.txt'), 'utf8'), /\/UPDATE/);
+  assert.equal(fs.existsSync(path.join(target, 'uninstaller-called.txt')), true, 'non-installed markers keep the original installer path');
 });
 
 test('NSIS identity permits exactly the known Tauri UNK to NSS marker transformation', () => {

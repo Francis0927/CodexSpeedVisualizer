@@ -19,6 +19,7 @@ pub struct Settings {
     pub position: Option<Position>,
     pub position_is_physical: bool,
     pub history_reset_at: i64,
+    pub tibo_poll_minutes: u64,
     #[serde(skip_serializing_if = "Option::is_none", skip_deserializing)]
     pub view_size: Option<String>,
 }
@@ -34,6 +35,7 @@ impl Default for Settings {
             position: None,
             position_is_physical: false,
             history_reset_at: 0,
+            tibo_poll_minutes: 10,
             view_size: None,
         }
     }
@@ -107,6 +109,9 @@ pub fn save(settings: &Settings) -> Result<(), String> {
 impl Settings {
     fn normalize_modes(&mut self) {
         if self.edge_dock { self.always_on_top = false; }
+        if ![1, 5, 10, 15, 30, 60].contains(&self.tibo_poll_minutes) {
+            self.tibo_poll_minutes = 10;
+        }
     }
     pub fn payload(&self, panel: bool) -> Self {
         let mut s = self.clone();
@@ -139,12 +144,34 @@ impl Settings {
         {
             self.size = size.to_string();
         }
+        if let Some(minutes) = patch["tiboPollMinutes"].as_u64()
+            .filter(|v| [1, 5, 10, 15, 30, 60].contains(v))
+        {
+            self.tibo_poll_minutes = minutes;
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn reset_poll_interval_defaults_validates_and_round_trips() {
+        let mut settings: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(settings.tibo_poll_minutes, 10);
+        for minutes in [1, 5, 10, 15, 30, 60] {
+            settings.patch(&serde_json::json!({"tiboPollMinutes": minutes}));
+            let restored: Settings = serde_json::from_value(serde_json::to_value(&settings).unwrap()).unwrap();
+            assert_eq!(restored.tibo_poll_minutes, minutes);
+        }
+        for invalid in [serde_json::json!(0), serde_json::json!(-1), serde_json::json!(2.5), serde_json::json!(1440), serde_json::json!("10")] {
+            settings.patch(&serde_json::json!({"tiboPollMinutes": invalid}));
+            assert_eq!(settings.tibo_poll_minutes, 60);
+        }
+        settings.tibo_poll_minutes = u64::MAX;
+        settings.normalize_modes();
+        assert_eq!(settings.tibo_poll_minutes, 10);
+    }
     #[test]
     fn dock_and_topmost_are_mutually_exclusive_and_legacy_settings_default_off() {
         let mut settings: Settings = serde_json::from_value(serde_json::json!({"alwaysOnTop":true})).unwrap();
@@ -166,7 +193,7 @@ pub fn autostart(enabled: bool) -> Result<(), String> {
     let (key, _) = root
         .create_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Run")
         .map_err(|e| e.to_string())?;
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let exe = crate::runtime::launcher_path().map_err(|e| e.to_string())?;
     if enabled {
         key.set_value("Codex Speed Pet", &format!("\"{}\"", exe.display()))
             .map_err(|e| e.to_string())?;

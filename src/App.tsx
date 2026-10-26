@@ -7,7 +7,7 @@ const EMPTY: UsageSnapshot = {
   day: null, input: 0, output: 0, total: 0, historyTotal: 0, rateLimits: null, speed: 0, turnSpeed: null, turnTokens: null, turnSeconds: null,
   active: false, running: false, lastEvent: null, eventCount: 0, source: "waiting", error: null
 };
-const DEFAULT_SETTINGS: AppSettings = { alwaysOnTop: true, edgeDock: false, reducedMotion: false, launchAtLogin: false, size: "medium", autoHideChrome: true };
+const DEFAULT_SETTINGS: AppSettings = { alwaysOnTop: true, edgeDock: false, reducedMotion: false, launchAtLogin: false, size: "medium", autoHideChrome: true, tiboPollMinutes: 10 };
 const SIZE_SCALE = { small: 0.55, medium: 0.82, large: 1.05 };
 
 function shortCount(value: number) {
@@ -239,7 +239,7 @@ export default function App() {
       </span></div>
       <QuotaRow label="5 小时" quota={usage.rateLimits?.fiveHour ?? null} now={clock} />
       <QuotaRow label="一周" quota={usage.rateLimits?.weekly ?? null} now={clock} />
-      <TiboPrediction snapshot={tibo} now={clock} />
+      <TiboPrediction snapshot={tibo} now={clock} pollMinutes={settings.tiboPollMinutes} />
     </section>
     </div>
 
@@ -278,6 +278,11 @@ export default function App() {
         </div>}
         <Toggle label="开机启动" checked={settings.launchAtLogin} onChange={(launchAtLogin) => update({ launchAtLogin })} disabled={!window.speedPet} />
         <div className="settings-section">统计</div>
+        <label className="preference-choice"><span>Reset 检测间隔</span>
+          <select className="mini-button" aria-label="Reset 检测间隔" value={settings.tiboPollMinutes} onChange={event => update({ tiboPollMinutes: Number(event.target.value) })}>
+            {[1, 5, 10, 15, 30, 60].map(minutes => <option key={minutes} value={minutes}>{minutes} 分钟</option>)}
+          </select>
+        </label>
         <div className="history-reset-row">
           <div className="update-info"><span>历史累计</span><small>当前 {fullCount(usage.historyTotal)} token；重置后从此刻重新累计</small></div>
           {confirmHistoryReset && <button type="button" className="mini-button" onClick={() => setConfirmHistoryReset(false)}>取消</button>}

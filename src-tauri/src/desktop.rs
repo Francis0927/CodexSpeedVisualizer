@@ -324,7 +324,7 @@ fn test_tibo_status(app: AppHandle, snapshot: tibo::Snapshot) -> Result<(), Stri
 fn test_window_state(app: AppHandle) -> Result<Value, String> {
     settings::test_dir().ok_or("Test controls are disabled")?;
     let w = window(&app).ok_or("Missing test window")?;
-    Ok(json!({"topmost":native::styles(&w).0}))
+    Ok(json!({"topmost":native::styles(&w).0,"processName":std::env::current_exe().ok().and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned())),"launcher":crate::runtime::launcher_path().ok()}))
 }
 #[tauri::command]
 async fn check_update(app: AppHandle) -> Result<update::Status, String> {
@@ -624,7 +624,8 @@ pub fn run() {
                     loop {
                         let state = handle.state::<AppState>();
                         if state.stop.load(Ordering::Relaxed) { break; }
-                        if tracker.poll() {
+                        let minutes = state.settings.lock().unwrap().tibo_poll_minutes;
+                        if tracker.poll(std::time::Duration::from_secs(minutes * 60)) {
                             *state.tibo.lock().unwrap() = tracker.snapshot.clone();
                             let _ = handle.emit("tibo:update", &tracker.snapshot);
                         }

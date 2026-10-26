@@ -5,7 +5,6 @@ use std::{
 };
 
 const STATUS_URL: &str = "https://codex-resets.com/api/v1/status";
-pub const POLL_INTERVAL: Duration = Duration::from_secs(30 * 60);
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -131,27 +130,27 @@ fn fetch() -> Result<Data, String> {
 
 pub struct Tracker {
     pub snapshot: Snapshot,
-    next_poll: Instant,
+    last_poll: Option<Instant>,
 }
 
 impl Tracker {
     pub fn new() -> Self {
         Self {
             snapshot: Snapshot::default(),
-            next_poll: Instant::now(),
+            last_poll: None,
         }
     }
 
-    pub fn poll(&mut self) -> bool {
-        self.poll_with(Instant::now(), fetch)
+    pub fn poll(&mut self, interval: Duration) -> bool {
+        self.poll_with(Instant::now(), interval, fetch)
     }
 
-    fn poll_with(&mut self, now: Instant, request: impl FnOnce() -> Result<Data, String>) -> bool {
-        if now < self.next_poll {
+    fn poll_with(&mut self, now: Instant, interval: Duration, request: impl FnOnce() -> Result<Data, String>) -> bool {
+        if self.last_poll.is_some_and(|last| now.duration_since(last) < interval) {
             return false;
         }
         // Schedule from the current attempt, so resume never causes catch-up bursts.
-        self.next_poll = now + POLL_INTERVAL;
+        self.last_poll = Some(now);
         match request() {
             Ok(data) => {
                 self.snapshot.data = Some(data);
@@ -175,27 +174,41 @@ mod tests {
     }
 
     #[test]
-    fn polls_immediately_then_every_half_hour_including_after_failure() {
+    fn polls_immediately_then_at_configured_interval_including_after_failure() {
         let mut tracker = Tracker::new();
+        let interval = Duration::from_secs(10 * 60);
         let start = Instant::now();
-        assert!(tracker.poll_with(start, || Ok(empty())));
+        assert!(tracker.poll_with(start, interval, || Ok(empty())));
         let fetched_at = tracker.snapshot.fetched_at;
         assert!(
-            !tracker.poll_with(start + POLL_INTERVAL - Duration::from_millis(1), || panic!(
+            !tracker.poll_with(start + interval - Duration::from_millis(1), interval, || panic!(
                 "too soon"
             ))
         );
-        assert!(tracker.poll_with(start + POLL_INTERVAL, || Err("offline".into())));
+        assert!(tracker.poll_with(start + interval, interval, || Err("offline".into())));
         assert!(tracker.snapshot.data.is_some());
         assert_eq!(tracker.snapshot.fetched_at, fetched_at);
         assert_eq!(tracker.snapshot.error.as_deref(), Some("offline"));
         assert!(
-            !tracker.poll_with(start + POLL_INTERVAL + Duration::from_secs(1), || panic!(
+            !tracker.poll_with(start + interval + Duration::from_secs(1), interval, || panic!(
                 "no rapid retry"
             ))
         );
-        assert!(tracker.poll_with(start + POLL_INTERVAL * 2, || Ok(empty())));
+        assert!(tracker.poll_with(start + interval * 2, interval, || Ok(empty())));
         assert!(tracker.snapshot.error.is_none());
+    }
+
+    #[test]
+    fn changed_interval_applies_to_last_attempt_without_catch_up_bursts() {
+        let mut tracker = Tracker::new();
+        let start = Instant::now();
+        let minute = Duration::from_secs(60);
+        assert!(tracker.poll_with(start, minute * 10, || Ok(empty())));
+        assert!(!tracker.poll_with(start + minute * 5, minute * 10, || panic!("too soon")));
+        assert!(tracker.poll_with(start + minute * 5, minute * 5, || Ok(empty())));
+        assert!(!tracker.poll_with(start + minute * 10, minute * 30, || panic!("interval increased")));
+        assert!(tracker.poll_with(start + minute * 120, minute * 30, || Ok(empty())));
+        assert!(!tracker.poll_with(start + minute * 120, minute * 30, || panic!("no catch-up")));
     }
 
     #[test]
